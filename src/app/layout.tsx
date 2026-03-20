@@ -1,22 +1,23 @@
-import type { Metadata } from 'next'
-import { Geist } from "next/font/google";
-import { cn } from "@/lib/utils";
-
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+import type { Metadata } from "next";
+import "./globals.css";
+import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: 'LinkedIn Lead Scraper V1',
-  description: 'Sistema de búsqueda de perfiles LinkedIn con IA',
-}
+  title: "LinkedIn Lead Scraper",
+  description: "Busca y extrae perfiles de LinkedIn usando Google Search",
+};
 
 export default function RootLayout({
   children,
-}: {
-  children: React.ReactNode
-}) {
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="es" className={cn("font-sans", geist.variable)}>
-      <body>{children}</body>
+    <html lang="es" className="dark">
+      <body>
+        {children}
+        <Toaster position="top-right" />
+      </body>
     </html>
-  )
+  );
 }

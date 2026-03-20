@@ -126,8 +126,8 @@ export async function POST(
   const searchId: string = searchRecord.id
 
   // --- Ejecutar búsqueda en background (sin await) ---
-  // En producción usar una cola (Bull/BullMQ), aquí fire-and-forget
-  executeLinkedInSearch(search_name, finalQuery, filters, max_results)
+  // Pasamos el searchId ya creado para evitar doble insert en BD
+  executeLinkedInSearch(search_name, finalQuery, filters, max_results, searchId)
     .then(() => {
       console.log(`✅ [API] Búsqueda "${search_name}" completada`)
     })

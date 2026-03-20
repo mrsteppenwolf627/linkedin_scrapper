@@ -23,6 +23,84 @@ import type {
 } from '@/types'
 
 // ============================================
+// VALIDACIÓN EN CÓDIGO (sin LLM, determinista)
+// ============================================
+
+// Mapa de equivalencias multilingüe para keywords comunes
+const KEYWORD_SYNONYMS: Record<string, string[]> = {
+  consultor: ['consultor', 'consultant', 'consulting', 'consultancy', 'consultora', 'advisor', 'adviser', 'asesor', 'asesora'],
+  energía:   ['energía', 'energia', 'energy', 'energético', 'energetico', 'renewables', 'renewable', 'clean energy', 'eólica', 'eolica', 'wind', 'fotovoltaica', 'fotovoltaic', 'photovoltaic'],
+  solar:     ['solar', 'photovoltaic', 'fotovoltaica', 'pv ', 'solar power', 'solar energy'],
+  renovables:['renovables', 'renewables', 'renewable energy', 'clean energy', 'energías renovables'],
+  tecnología:['tecnología', 'tecnologia', 'technology', 'tech', 'software', 'digital'],
+  finanzas:  ['finanzas', 'finance', 'financial', 'banking', 'investment', 'inversión'],
+  marketing: ['marketing', 'growth', 'digital marketing', 'brand'],
+}
+
+function keywordMatchesText(keyword: string, text: string): boolean {
+  const lowerText = text.toLowerCase()
+  const synonyms = KEYWORD_SYNONYMS[keyword.toLowerCase()] ?? [keyword.toLowerCase()]
+  return synonyms.some((syn) => lowerText.includes(syn))
+}
+
+function validateInCode(
+  contact: ParsedContact,
+  filters: SearchFilters,
+  rawText: string
+): { is_valid: boolean; razones_rechazo: string[]; score_cumplimiento: number; notas: string } {
+  const razones: string[] = []
+  let score = 0
+
+  // Criterio 1: el parsing lo marcó como válido
+  if (!contact.es_valido) {
+    razones.push('Datos insuficientes en el snippet')
+  } else {
+    score += 0.25
+  }
+
+  // Criterio 2: experiencia mínima (solo rechazar si tenemos el dato Y es claramente inferior)
+  if (contact.anos_experiencia !== null && contact.anos_experiencia < filters.years_min) {
+    razones.push(`Experiencia insuficiente (${contact.anos_experiencia} < ${filters.years_min} años)`)
+  } else {
+    score += 0.25 // null = beneficio de la duda
+  }
+
+  // Criterio 3: al menos 1 keyword en el texto completo
+  const keywordFound = filters.keywords.some((kw) => keywordMatchesText(kw, rawText))
+  if (!keywordFound) {
+    razones.push(`Ninguna keyword [${filters.keywords.join(', ')}] encontrada en el perfil`)
+  } else {
+    score += 0.25
+  }
+
+  // Criterio 4: ubicación — SOLO rechazar si la ubicación extraída es explícita Y fuera del target
+  // No rechazar si es null. Google ya filtra por localización via query + gl param.
+  if (filters.location && contact.ubicacion) {
+    const targetLower = filters.location.toLowerCase()
+    const profileLower = contact.ubicacion.toLowerCase()
+    // Verificamos si hay solapamiento básico (país o ciudad mencionada)
+    const locationOk = profileLower.includes(targetLower) ||
+                       targetLower.includes(profileLower) ||
+                       profileLower.includes('spain') ||
+                       profileLower.includes('españa')
+    if (!locationOk) {
+      razones.push(`Ubicación "${contact.ubicacion}" incompatible con "${filters.location}"`)
+    } else {
+      score += 0.25
+    }
+  } else {
+    score += 0.25 // null = no penalizar
+  }
+
+  return {
+    is_valid: razones.length === 0,
+    razones_rechazo: razones,
+    score_cumplimiento: Math.min(score, 1.0),
+    notas: razones.length === 0 ? 'Cumple todos los criterios' : razones.join('; '),
+  }
+}
+
+// ============================================
 // DEDUPLICACIÓN (sin Claude, rápida)
 // ============================================
 
@@ -109,32 +187,33 @@ export async function executeLinkedInSearch(
   searchName: string,
   googleQuery: string,
   filters: SearchFilters,
-  maxResults: number = 30
+  maxResults: number = 30,
+  existingSearchId?: string  // Si se pasa, no crea registro nuevo en BD
 ): Promise<SearchExecutionResult> {
   const supabase = createServerClient()
 
   console.log(`\n🔍 [Scraper] Iniciando búsqueda: "${searchName}"`)
   console.log(`📝 [Scraper] Query: ${googleQuery}`)
-  console.log(`⚙️  [Scraper] Filtros:`, filters)
 
-  // --- PASO 1: Crear registro en BD ---
-  const { data: searchRecord, error: searchInsertError } = await supabase
-    .from('searches')
-    .insert({
-      name: searchName,
-      filters,
-      google_query: googleQuery,
-      status: 'running',
-    })
-    .select()
-    .single()
+  // --- PASO 1: Usar ID existente o crear registro nuevo ---
+  let searchId: string
 
-  if (searchInsertError || !searchRecord) {
-    throw new Error(`Error creando búsqueda en BD: ${searchInsertError?.message}`)
+  if (existingSearchId) {
+    searchId = existingSearchId
+    console.log(`✅ [Scraper] Usando Search ID existente: ${searchId}`)
+  } else {
+    const { data: searchRecord, error: searchInsertError } = await supabase
+      .from('searches')
+      .insert({ name: searchName, filters, google_query: googleQuery, status: 'running' })
+      .select()
+      .single()
+
+    if (searchInsertError || !searchRecord) {
+      throw new Error(`Error creando búsqueda en BD: ${searchInsertError?.message}`)
+    }
+    searchId = searchRecord.id
+    console.log(`✅ [Scraper] Search ID creado: ${searchId}`)
   }
-
-  const searchId: string = searchRecord.id
-  console.log(`✅ [Scraper] Search ID: ${searchId}`)
 
   let totalProcessed = 0
   let totalCreated = 0
@@ -162,12 +241,15 @@ export async function executeLinkedInSearch(
     for (const result of googleResults) {
       totalProcessed++
       console.log(`\n📌 [${totalProcessed}/${googleResults.length}] ${result.title}`)
-      console.log(`   URL: ${result.link}`)
+      console.log(`   URL:     ${result.link}`)
+      console.log(`   Snippet: ${result.snippet.slice(0, 80)}...`)
 
-      // PASO 3a: Parsear snippet con Claude
+      // PASO 3a: Parsear snippet con OpenAI
+      // Combinamos title + snippet: el title de Google siempre tiene "Nombre - Cargo | Empresa"
+      const fullText = `${result.title}\n${result.snippet}`
       let parsed: ParsedContact
       try {
-        parsed = await parseLinkedInSnippet(result.snippet, result.link)
+        parsed = await parseLinkedInSnippet(fullText, result.link)
         console.log(
           `   Parse: ${parsed.nombre ?? 'sin nombre'} | válido=${parsed.es_valido} | score=${parsed.score_confianza}`
         )
@@ -183,18 +265,13 @@ export async function executeLinkedInSearch(
         continue
       }
 
-      // PASO 3b: Validar contra filtros con Claude
-      let validated: ValidatedContact
-      try {
-        validated = await validateContact(parsed, filters)
-        console.log(
-          `   Validación: válido=${validated.is_valid} | cumplimiento=${validated.score_cumplimiento}`
-        )
-      } catch (err) {
-        console.error(`   ❌ Validation error:`, err)
-        totalInvalid++
-        continue
-      }
+      // PASO 3b: Validación en código (fiable) + LLM solo para sector semántico
+      const validation = validateInCode(parsed, filters, fullText)
+      const validated: ValidatedContact = { ...parsed, ...validation }
+
+      console.log(
+        `   Validación: válido=${validated.is_valid} | cumplimiento=${validated.score_cumplimiento}`
+      )
 
       if (!validated.is_valid) {
         console.log(`   ⚠️  Rechazado: ${validated.razones_rechazo.join(', ')}`)
@@ -217,9 +294,10 @@ export async function executeLinkedInSearch(
       }
 
       // PASO 3d: Guardar en BD
-      const normalizedUrl = normalizeLinkedInUrl(result.link)
+      // Guardamos la URL original con https:// para que sea clickeable
+      // normalizeLinkedInUrl() solo se usa para comparación en checkDuplicate()
       const contactData = {
-        linkedin_url: normalizedUrl,
+        linkedin_url: result.link,
         name: validated.nombre ?? 'Desconocido',
         job_title: validated.titulo ?? null,
         company: validated.empresa ?? null,

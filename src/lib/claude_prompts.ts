@@ -1,39 +1,30 @@
 // ============================================
-// LinkedIn Scraper V1 - 4 Prompts Claude
+// LinkedIn Scraper V1 - 4 Prompts AI (OpenAI)
 // ============================================
 // Prompts: parse_snippet | validate_contact | check_duplicate | generate_query
 
-import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 import type {
   ParsedContact,
   ValidatedContact,
   DuplicateCheckResult,
   SearchFilters,
-  ContactRecord,
 } from '@/types'
 
-// Singleton del cliente Anthropic
-let anthropicClient: Anthropic | null = null
+// Singleton del cliente OpenAI
+let openaiClient: OpenAI | null = null
 
-function getAnthropic(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set in environment')
-    anthropicClient = new Anthropic({ apiKey })
+function getOpenAI(): OpenAI {
+  if (!openaiClient) {
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) throw new Error('OPENAI_API_KEY not set in environment')
+    openaiClient = new OpenAI({ apiKey })
   }
-  return anthropicClient
+  return openaiClient
 }
 
-// Helper: extrae JSON de la respuesta de Claude (maneja markdown ```json ... ```)
-function extractJson<T>(responseText: string): T {
-  const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) {
-    throw new Error(
-      `No valid JSON found in Claude response: ${responseText.slice(0, 200)}`
-    )
-  }
-  return JSON.parse(jsonMatch[0]) as T
-}
+// Modelo a usar: gpt-4o-mini (rápido, barato, suficiente para parsing estructurado)
+const MODEL = 'gpt-4o-mini'
 
 // ============================================
 // PROMPT 1: parse_linkedin_snippet_v1
@@ -44,21 +35,23 @@ export async function parseLinkedInSnippet(
   snippet: string,
   linkedinUrl: string
 ): Promise<ParsedContact> {
-  const anthropic = getAnthropic()
+  const openai = getOpenAI()
 
-  const prompt = `Eres un extractor experto de datos de perfiles de LinkedIn desde snippets de Google Search.
-
-**SNIPPET DE GOOGLE:**
-${snippet}
-
-**URL LINKEDIN:**
-${linkedinUrl}
-
-Extrae los datos disponibles y devuelve SOLO un JSON válido, sin markdown ni explicaciones adicionales.
-
-Estructura requerida:
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 400,
+    response_format: { type: 'json_object' }, // Garantiza JSON válido sin regex
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Eres un extractor experto de datos de perfiles de LinkedIn desde snippets de Google Search. Siempre respondes con JSON válido.',
+      },
+      {
+        role: 'user',
+        content: `Extrae los datos del siguiente snippet y devuelve un JSON con esta estructura exacta:
 {
-  "nombre": "nombre completo o null si no se encuentra",
+  "nombre": "nombre completo o null",
   "titulo": "job title/puesto actual o null",
   "empresa": "nombre de la empresa actual o null",
   "ubicacion": "ciudad/país o null",
@@ -66,23 +59,23 @@ Estructura requerida:
   "palabras_clave_encontradas": ["keyword1", "keyword2"],
   "score_confianza": número entre 0.0 y 1.0,
   "es_valido": true o false,
-  "notas": "observaciones relevantes en una frase"
+  "notas": "observación en una frase"
 }
 
-Reglas estrictas:
-- Si un dato no está claro, devuelve null. NUNCA inventar datos.
-- score_confianza: 1.0 = todos los campos presentes y claros. Reduce 0.1 por cada campo null o ambiguo.
-- es_valido = false si: falta el nombre, el snippet es spam/irrelevante, o la URL no es linkedin.com/in/
-- palabras_clave_encontradas: solo las que aparecen literalmente en el snippet (sector, rol, skills)`
+SNIPPET: ${snippet}
+URL LINKEDIN: ${linkedinUrl}
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001', // Haiku es suficiente para parsing, más barato
-    max_tokens: 400,
-    messages: [{ role: 'user', content: prompt }],
+Reglas:
+- Si un dato no está claro → null. NUNCA inventar.
+- score_confianza: 1.0 = todos los campos claros. Reduce 0.1 por cada campo null/ambiguo.
+- es_valido = false si: falta nombre, snippet es spam, o URL no es linkedin.com/in/
+- palabras_clave_encontradas: solo las que aparecen literalmente en el snippet.`,
+      },
+    ],
   })
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  return extractJson<ParsedContact>(text)
+  const text = response.choices[0].message.content ?? '{}'
+  return JSON.parse(text) as ParsedContact
 }
 
 // ============================================
@@ -92,52 +85,62 @@ Reglas estrictas:
 
 export async function validateContact(
   contact: ParsedContact,
-  filters: SearchFilters
+  filters: SearchFilters,
+  rawText?: string  // Texto original completo (title + snippet) para mejor matching
 ): Promise<ValidatedContact> {
-  const anthropic = getAnthropic()
+  const openai = getOpenAI()
 
-  const prompt = `Valida si este contacto cumple los criterios de búsqueda de LinkedIn.
-
-**CONTACTO PARSEADO:**
-${JSON.stringify(contact, null, 2)}
-
-**FILTROS DE BÚSQUEDA:**
-- Sector objetivo: ${filters.sector}
-- Años mínimos de experiencia: ${filters.years_min}
-- Palabras clave requeridas: ${filters.keywords.join(', ')}
-- Ubicación (opcional): ${filters.location ?? 'No especificada'}
-
-Devuelve SOLO un JSON válido:
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 300,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Eres un validador de contactos de LinkedIn. Evalúas si un perfil cumple los criterios de búsqueda. Siempre respondes con JSON válido.',
+      },
+      {
+        role: 'user',
+        content: `Valida si este contacto cumple los criterios y devuelve JSON:
 {
   "is_valid": true o false,
-  "razones_rechazo": ["razón1", "razón2"],
+  "razones_rechazo": ["razón1"],
   "score_cumplimiento": número entre 0.0 y 1.0,
   "notas": "explicación breve"
 }
 
-Criterios de validación (todos deben cumplirse para is_valid = true):
-1. es_valido del contacto es true (datos suficientes)
-2. anos_experiencia >= ${filters.years_min} (o null si no se sabe → no rechazar por esto)
-3. Al menos 1 palabra clave de [${filters.keywords.join(', ')}] aparece en título o empresa
-4. El sector "${filters.sector}" tiene relación con el título/empresa del contacto
-5. Si se especificó ubicación y el contacto tiene ubicación, deben ser compatibles
+DATOS EXTRAÍDOS: ${JSON.stringify(contact)}
+${rawText ? `TEXTO COMPLETO DEL PERFIL: "${rawText}"` : ''}
 
-score_cumplimiento: suma 0.25 por criterio cumplido. Máximo 1.0.
-Si is_valid = false, razones_rechazo debe explicar cuál criterio falló.`
+FILTROS:
+- Sector: ${filters.sector}
+- Años mínimos: ${filters.years_min}
+- Keywords: ${filters.keywords.join(', ')}
+- Ubicación requerida: ${filters.location ?? 'No especificada'}
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
-    messages: [{ role: 'user', content: prompt }],
+Criterios para is_valid = true:
+1. es_valido del contacto es true
+2. anos_experiencia >= ${filters.years_min} — si es null, NO rechazar
+3. Al menos 1 keyword aparece en el TEXTO COMPLETO (no solo campos extraídos). Acepta equivalentes multilingüe:
+   "consultor/a" = consultant, consulting, consultancy, advisor, asesor
+   "energía" = energy, energético, renewables, renewable, clean energy, solar, eólica, wind
+   "solar" = solar, photovoltaic, PV, fotovoltaica
+4. El sector "${filters.sector}" tiene relación semántica con el perfil
+5. Ubicación: solo rechazar si la ubicación del contacto es explícita Y claramente fuera de ${filters.location ?? 'España'}. Si es null → NO rechazar.
+
+score_cumplimiento: 0.25 por criterio cumplido.`,
+      },
+    ],
   })
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  const validation = extractJson<{
+  const text = response.choices[0].message.content ?? '{}'
+  const validation = JSON.parse(text) as {
     is_valid: boolean
     razones_rechazo: string[]
     score_cumplimiento: number
     notas: string
-  }>(text)
+  }
 
   return { ...contact, ...validation }
 }
@@ -145,54 +148,54 @@ Si is_valid = false, razones_rechazo debe explicar cuál criterio falló.`
 // ============================================
 // PROMPT 3: check_duplicate_v1
 // Deduplicación inteligente: ¿son la misma persona?
-// Solo se llama cuando hay candidatos similares (no URL exacta)
+// Solo se llama cuando hay candidatos similares por nombre
 // ============================================
 
 export async function checkDuplicateWithClaude(
   newContact: { nombre: string | null; linkedin_url: string; email?: string | null },
   existingContact: { name: string; linkedin_url: string; email?: string | null }
 ): Promise<DuplicateCheckResult> {
-  const anthropic = getAnthropic()
+  const openai = getOpenAI()
 
-  const prompt = `Determina si estos dos contactos son la MISMA persona de LinkedIn.
-
-**CONTACTO NUEVO:**
-- Nombre: ${newContact.nombre ?? 'desconocido'}
-- LinkedIn URL: ${newContact.linkedin_url}
-- Email: ${newContact.email ?? 'no disponible'}
-
-**CONTACTO EXISTENTE EN BD:**
-- Nombre: ${existingContact.name}
-- LinkedIn URL: ${existingContact.linkedin_url}
-- Email: ${existingContact.email ?? 'no disponible'}
-
-Devuelve SOLO un JSON válido:
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 150,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Determinas si dos contactos de LinkedIn son la misma persona. Respondes siempre con JSON válido.',
+      },
+      {
+        role: 'user',
+        content: `¿Son la misma persona? Devuelve JSON:
 {
   "is_duplicate": true o false,
   "confianza": número entre 0.0 y 1.0,
-  "razon": "explicación de la decisión en una frase"
+  "razon": "explicación en una frase"
 }
 
-Criterios de evaluación (en orden de prioridad):
-1. Email exacto igual → duplicado con confianza 1.0
-2. LinkedIn URL normalizada igual → duplicado con confianza 0.95
-3. Nombre muy similar (variaciones: "J. Smith" ≈ "John Smith") + misma empresa → confianza 0.80
-4. Solo nombre parecido sin más datos → confianza ≤ 0.50 → NO marcar como duplicado
+NUEVO: nombre="${newContact.nombre}", url="${newContact.linkedin_url}", email="${newContact.email ?? 'n/a'}"
+EXISTENTE: nombre="${existingContact.name}", url="${existingContact.linkedin_url}", email="${existingContact.email ?? 'n/a'}"
 
-Considera duplicado (is_duplicate = true) solo si confianza >= 0.75.`
+Criterios:
+- Email exacto igual → confianza 1.0
+- URL normalizada igual → confianza 0.95
+- Nombre muy similar + misma empresa → confianza 0.80
+- Solo nombre parecido → confianza ≤ 0.50
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
-    messages: [{ role: 'user', content: prompt }],
+Marcar duplicado solo si confianza >= 0.75.`,
+      },
+    ],
   })
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  const result = extractJson<{
+  const text = response.choices[0].message.content ?? '{}'
+  const result = JSON.parse(text) as {
     is_duplicate: boolean
     confianza: number
     razon: string
-  }>(text)
+  }
 
   return {
     isDuplicate: result.is_duplicate,
@@ -206,36 +209,41 @@ Considera duplicado (is_duplicate = true) solo si confianza >= 0.75.`
 // ============================================
 
 export async function generateGoogleQuery(filters: SearchFilters): Promise<string> {
-  const anthropic = getAnthropic()
+  const openai = getOpenAI()
 
-  const prompt = `Genera una query de búsqueda de Google para encontrar perfiles de LinkedIn que cumplan estos criterios.
-
-**FILTROS:**
+  // Este prompt devuelve texto plano (la query), no JSON
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 150,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Generas queries de Google para encontrar perfiles de LinkedIn. Respondes SOLO con la query, sin explicaciones ni comillas.',
+      },
+      {
+        role: 'user',
+        content: `Genera una query de Google para estos filtros:
 - Sector: ${filters.sector}
-- Años mínimos de experiencia: ${filters.years_min}
-- Palabras clave: ${filters.keywords.join(', ')}
-- Ubicación: ${filters.location ?? 'España (por defecto)'}
+- Años mínimos: ${filters.years_min}
+- Keywords: ${filters.keywords.join(', ')}
+- Ubicación: ${filters.location ?? 'España'}
 
-Devuelve SOLO la query de búsqueda como string (sin explicaciones, sin comillas externas).
-
-Reglas para construir la query:
-1. Siempre empieza con: site:linkedin.com/in
-2. Incluye variaciones ES e EN de cada palabra clave conectadas con OR
-3. Añade los años de experiencia en formato: "${filters.years_min}+ años" OR "${filters.years_min}+ years"
-4. Añade la ubicación al final si se especificó
+Reglas:
+1. Empieza siempre con: site:linkedin.com/in
+2. Incluye variaciones ES e EN de cada keyword con OR
+3. Años: ${filters.years_min}+ años OR ${filters.years_min}+ years
+4. Añade ubicación al final
 5. Usa paréntesis para agrupar variaciones
-6. Máximo 10 términos para no saturar Google
+6. Máximo 10 términos
+7. MUY IMPORTANTE: NO uses comillas dobles en ninguna parte de la query
 
-Ejemplo de estructura:
-site:linkedin.com/in (consultor OR consultant) (energía OR energy OR solar) (5+ años OR 5+ years) España`
-
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
-    messages: [{ role: 'user', content: prompt }],
+Ejemplo: site:linkedin.com/in (consultor OR consultant) (energía OR energy) (5+ años OR 5+ years) España`,
+      },
+    ],
   })
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  // Limpiar comillas o espacios extra que Claude pueda añadir
-  return text.trim().replace(/^["']|["']$/g, '')
+  const text = response.choices[0].message.content ?? ''
+  // Eliminar comillas externas Y comillas internas — Serper las rechaza con site:
+  return text.trim().replace(/^["']|["']$/g, '').replace(/"/g, '')
 }

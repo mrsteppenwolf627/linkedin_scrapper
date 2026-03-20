@@ -35,7 +35,8 @@ Todas las tareas del backend están implementadas y listas para conectar con el 
   - `validateContact(contact, filters)` — Valida contra criterios de búsqueda
   - `checkDuplicateWithClaude(new, existing)` — Dedup fuzzy con IA
   - `generateGoogleQuery(filters)` — Genera query Google optimizada
-- Modelo: `claude-haiku-4-5-20251001` (más barato, suficiente para parsing)
+- Modelo: `gpt-4o-mini` (OpenAI) — usa `response_format: json_object` para JSON garantizado
+- ⚠️ Variable de entorno: `OPENAI_API_KEY` (no Anthropic)
 
 ### ✅ Tarea 4: Orquestador Core (COMPLETA)
 - `src/lib/linkedin_scraper.ts`
@@ -90,7 +91,7 @@ Copiar `.env.example` a `.env.local` y rellenar:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
 SERPER_API_KEY=
 SEARCH_API_KEY=          ← Header requerido: x-api-key
 ```

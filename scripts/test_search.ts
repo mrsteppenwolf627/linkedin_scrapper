@@ -63,11 +63,11 @@ async function testGoogleSearch(query: string) {
 }
 
 // ============================================
-// TEST 3: Claude Parsing
+// TEST 3: OpenAI Parsing
 // ============================================
 async function testParsing(snippet: string, url: string) {
   console.log('\n' + '='.repeat(50))
-  console.log('TEST 3: Parsing con Claude')
+  console.log('TEST 3: Parsing con OpenAI (gpt-4o-mini)')
   console.log('='.repeat(50))
 
   console.log('Snippet a parsear:', snippet.slice(0, 150))
@@ -77,11 +77,11 @@ async function testParsing(snippet: string, url: string) {
 }
 
 // ============================================
-// TEST 4: Claude Validation
+// TEST 4: OpenAI Validation
 // ============================================
 async function testValidation(parsed: Awaited<ReturnType<typeof parseLinkedInSnippet>>) {
   console.log('\n' + '='.repeat(50))
-  console.log('TEST 4: Validación con Claude')
+  console.log('TEST 4: Validación con OpenAI (gpt-4o-mini)')
   console.log('='.repeat(50))
 
   const validated = await validateContact(parsed, TEST_FILTERS)
