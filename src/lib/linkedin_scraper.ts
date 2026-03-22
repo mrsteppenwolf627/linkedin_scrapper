@@ -26,77 +26,39 @@ import type {
 // VALIDACIÓN EN CÓDIGO (sin LLM, determinista)
 // ============================================
 
-// Mapa de equivalencias multilingüe para keywords comunes
-const KEYWORD_SYNONYMS: Record<string, string[]> = {
-  consultor: ['consultor', 'consultant', 'consulting', 'consultancy', 'consultora', 'advisor', 'adviser', 'asesor', 'asesora'],
-  energía:   ['energía', 'energia', 'energy', 'energético', 'energetico', 'renewables', 'renewable', 'clean energy', 'eólica', 'eolica', 'wind', 'fotovoltaica', 'fotovoltaic', 'photovoltaic'],
-  solar:     ['solar', 'photovoltaic', 'fotovoltaica', 'pv ', 'solar power', 'solar energy'],
-  renovables:['renovables', 'renewables', 'renewable energy', 'clean energy', 'energías renovables'],
-  tecnología:['tecnología', 'tecnologia', 'technology', 'tech', 'software', 'digital'],
-  finanzas:  ['finanzas', 'finance', 'financial', 'banking', 'investment', 'inversión'],
-  marketing: ['marketing', 'growth', 'digital marketing', 'brand'],
-}
-
-function keywordMatchesText(keyword: string, text: string): boolean {
-  const lowerText = text.toLowerCase()
-  const synonyms = KEYWORD_SYNONYMS[keyword.toLowerCase()] ?? [keyword.toLowerCase()]
-  return synonyms.some((syn) => lowerText.includes(syn))
-}
-
 function validateInCode(
   contact: ParsedContact,
   filters: SearchFilters,
   rawText: string
 ): { is_valid: boolean; razones_rechazo: string[]; score_cumplimiento: number; notas: string } {
   const razones: string[] = []
-  let score = 0
 
-  // Criterio 1: el parsing lo marcó como válido
-  if (!contact.es_valido) {
-    razones.push('Datos insuficientes en el snippet')
-  } else {
-    score += 0.25
+  // 1. Validar nombre
+  if (!contact.nombre || contact.nombre.trim() === '') {
+    razones.push('Nombre no encontrado o inválido')
   }
 
-  // Criterio 2: experiencia mínima (solo rechazar si tenemos el dato Y es claramente inferior)
-  if (contact.anos_experiencia !== null && contact.anos_experiencia < filters.years_min) {
-    razones.push(`Experiencia insuficiente (${contact.anos_experiencia} < ${filters.years_min} años)`)
-  } else {
-    score += 0.25 // null = beneficio de la duda
-  }
+  // 2. Unimos todo el texto disponible para la validación semántica rápida
+  const validationText = `${contact.nombre} ${rawText} ${contact.titulo || ''} ${contact.empresa || ''} ${contact.ubicacion || ''}`.toLowerCase()
 
-  // Criterio 3: al menos 1 keyword en el texto completo
-  const keywordFound = filters.keywords.some((kw) => keywordMatchesText(kw, rawText))
-  if (!keywordFound) {
-    razones.push(`Ninguna keyword [${filters.keywords.join(', ')}] encontrada en el perfil`)
-  } else {
-    score += 0.25
-  }
+  // 3. Crear un array dinámico con los nuevos filtros (ignorando si están vacíos)
+  const validationTerms = [filters.jobTitle, filters.industry, filters.location]
+    .filter(Boolean)
+    .map(t => t.toLowerCase())
 
-  // Criterio 4: ubicación — SOLO rechazar si la ubicación extraída es explícita Y fuera del target
-  // No rechazar si es null. Google ya filtra por localización via query + gl param.
-  if (filters.location && contact.ubicacion) {
-    const targetLower = filters.location.toLowerCase()
-    const profileLower = contact.ubicacion.toLowerCase()
-    // Verificamos si hay solapamiento básico (país o ciudad mencionada)
-    const locationOk = profileLower.includes(targetLower) ||
-                       targetLower.includes(profileLower) ||
-                       profileLower.includes('spain') ||
-                       profileLower.includes('españa')
-    if (!locationOk) {
-      razones.push(`Ubicación "${contact.ubicacion}" incompatible con "${filters.location}"`)
-    } else {
-      score += 0.25
+  // 4. Validar que al menos uno de los términos (puesto, sector o ciudad) aparezca en el texto
+  if (validationTerms.length > 0) {
+    const termFound = validationTerms.some(term => term && validationText.includes(term))
+    if (!termFound) {
+      razones.push(`Ninguno de los términos [${validationTerms.join(', ')}] encontrado en el perfil`)
     }
-  } else {
-    score += 0.25 // null = no penalizar
   }
 
   return {
     is_valid: razones.length === 0,
     razones_rechazo: razones,
-    score_cumplimiento: Math.min(score, 1.0),
-    notas: razones.length === 0 ? 'Cumple todos los criterios' : razones.join('; '),
+    score_cumplimiento: razones.length === 0 ? 1.0 : 0.25,
+    notas: razones.length === 0 ? 'Filtros iniciales ok' : razones.join('; '),
   }
 }
 
@@ -188,7 +150,8 @@ export async function executeLinkedInSearch(
   googleQuery: string,
   filters: SearchFilters,
   maxResults: number = 30,
-  existingSearchId?: string  // Si se pasa, no crea registro nuevo en BD
+  existingSearchId?: string,
+  onProgress?: (lead: ContactRecord) => void
 ): Promise<SearchExecutionResult> {
   const supabase = createServerClient()
 
@@ -336,7 +299,11 @@ export async function executeLinkedInSearch(
         } else {
           console.log(`   ✅ Guardado: ${validated.nombre}`)
           totalCreated++
-          if (created) results.push(created as ContactRecord)
+          if (created) {
+            const newLead = created as ContactRecord;
+            results.push(newLead);
+            if (onProgress) onProgress(newLead); // <-- EMITE EL LEAD EN TIEMPO REAL
+          }
         }
       } catch (err) {
         console.error(`   ❌ Save error:`, err)

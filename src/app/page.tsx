@@ -52,10 +52,9 @@ interface Contact {
 }
 
 interface FormData {
-  search_name: string;
-  sector: string;
-  years_min: string;
-  keywords: string;
+  jobTitle: string;
+  experience: string;
+  industry: string;
   location: string;
 }
 
@@ -94,24 +93,20 @@ export default function Dashboard() {
 
   // === FORM STATE ===
   const [formData, setFormData] = useState<FormData>({
-    search_name: "",
-    sector: "tech",
-    years_min: "5",
-    keywords: "",
+    jobTitle: "",
+    experience: "",
+    industry: "",
     location: "",
   });
 
   // === GOOGLE QUERY PREVIEW ===
   const googleQueryPreview = useMemo(() => {
-    const keywords = formData.keywords
-      .split(",")
-      .map((k) => k.trim())
-      .filter(Boolean);
-
-    if (keywords.length === 0) return "Esperando palabras clave...";
-
-    return `site:linkedin.com/in (${keywords.join(" OR ")}) ("${formData.years_min}+ años" OR "${formData.years_min}+ years") ${formData.location || ""}`.trim();
-  }, [formData.keywords, formData.years_min, formData.location]);
+    const { jobTitle, experience, industry, location } = formData;
+    if (!jobTitle && !experience && !industry && !location) {
+      return "Esperando parámetros de búsqueda...";
+    }
+    return `inurl:linkedin.com/in/ intitle:"LinkedIn" ${jobTitle} ${experience} ${industry} ${location}`.trim();
+  }, [formData]);
 
   // === CARGAR BÚSQUEDAS ===
   const loadSearches = useCallback(async (isSilent = false) => {
@@ -200,10 +195,10 @@ export default function Dashboard() {
     setLoading(true);
 
     try {
-      const keywords = formData.keywords
-        .split(",")
-        .map((k) => k.trim())
-        .filter(Boolean);
+      // Generación automática del identificador único
+      const firstKeyword = formData.jobTitle.toLowerCase().split(' ')[0] || "search";
+      const locationSlug = formData.location ? `-${formData.location.toLowerCase().replace(/\s+/g, "_")}` : "";
+      const generatedName = `search-${firstKeyword}${locationSlug}-${Date.now()}`;
 
       const response = await fetch("/api/search", {
         method: "POST",
@@ -212,13 +207,12 @@ export default function Dashboard() {
           "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY || "",
         },
         body: JSON.stringify({
-          search_name: formData.search_name,
-          google_query: googleQueryPreview,
+          search_name: generatedName,
           filters: {
-            sector: formData.sector,
-            years_min: parseInt(formData.years_min),
-            keywords: keywords,
-            location: formData.location || undefined,
+            jobTitle: formData.jobTitle,
+            experience: formData.experience,
+            industry: formData.industry,
+            location: formData.location,
           },
           max_results: 30,
         }),
@@ -229,18 +223,76 @@ export default function Dashboard() {
         throw new Error(errData.message || `API error: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      const searchId = data.search_id;
-      
-      setActiveSearchId(searchId);
-      setProgress({ processed: 0, created: 0, duplicates: 0, invalid: 0, status: 'running' });
-      
-      toast.info("☕ Búsqueda iniciada. Relájate mientras Claude trabaja.", {
-        style: { background: THEME.card, color: THEME.primary, border: `1px solid ${THEME.border}` }
-      });
-      
-      pollStatus(searchId);
-      loadSearches(true);
+      // --- CONSUMO DEL STREAM (SSE) ---
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No se pudo iniciar el stream de datos");
+
+      let buffer = '';
+      const STATUS_TOAST_ID = "search-status-toast";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        
+        // El formato SSE separa eventos por \n\n
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+
+          // Extraer event y data de la parte
+          const lines = part.split('\n');
+          let event = 'message';
+          let data = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) event = line.replace('event:', '').trim();
+            if (line.startsWith('data:')) data = line.replace('data:', '').trim();
+          }
+
+          if (!data) continue;
+          const parsedData = JSON.parse(data);
+
+          switch (event) {
+            case 'search_created':
+              setActiveSearchId(parsedData.search_id);
+              setSelectedSearch(parsedData.search_id);
+              setContacts([]); // Limpiar tabla
+              setProgress({ processed: 0, created: 0, duplicates: 0, invalid: 0, status: 'running' });
+              break;
+
+            case 'status':
+              toast.info(parsedData.message, { 
+                id: STATUS_TOAST_ID, // ID fijo para actualizar el mismo toast
+                style: { background: THEME.card, color: THEME.primary, border: `1px solid ${THEME.border}` }
+              });
+              break;
+
+            case 'lead_found':
+              const lead = parsedData as Contact;
+              setContacts(prev => [lead, ...prev]);
+              setProgress(prev => prev ? ({ ...prev, created: prev.created + 1 }) : null);
+              break;
+
+            case 'done':
+              setLoading(false);
+              toast.success(`Búsqueda completada: ${parsedData.total_created} leads generados`, {
+                id: STATUS_TOAST_ID // Reutilizamos el ID para cerrar el flujo positivamente
+              });
+              loadSearches(true);
+              break;
+
+            case 'error':
+              setLoading(false);
+              toast.error(`Error: ${parsedData.message}`, { id: STATUS_TOAST_ID });
+              break;
+          }
+        }
+      }
 
       setFormData({
         search_name: "",
@@ -252,7 +304,7 @@ export default function Dashboard() {
 
     } catch (error: any) {
       console.error("Error:", error);
-      toast.error(`Error: ${error.message}`);
+      toast.error(`Error crítico: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -440,79 +492,64 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent className="pt-8">
                     <form onSubmit={handleCreateSearch} className="space-y-8">
-                      <div className="space-y-3">
-                        <Label htmlFor="search_name" className="text-sm opacity-70">Identificador de la búsqueda</Label>
-                        <Input
-                          id="search_name"
-                          placeholder="ej: artesanos_madera_galicia"
-                          value={formData.search_name}
-                          onChange={(e) => setFormData({ ...formData, search_name: e.target.value })}
-                          className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2 transition-all"
-                          style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
-                          required
-                        />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-3">
+                          <Label htmlFor="jobTitle" className="text-sm opacity-70">Puesto</Label>
+                          <Input
+                            id="jobTitle"
+                            type="text"
+                            placeholder="Ej: Director de Marketing, Frontend..."
+                            value={formData.jobTitle}
+                            onChange={(e) => setFormData({ ...formData, jobTitle: e.target.value })}
+                            className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
+                            style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-3">
+                          <Label htmlFor="experience" className="text-sm opacity-70">Años de experiencia</Label>
+                          <Input
+                            id="experience"
+                            type="text"
+                            placeholder="Ej: 5 años, Senior, +3..."
+                            value={formData.experience}
+                            onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
+                            className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
+                            style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
+                            required
+                          />
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-3">
-                          <Label htmlFor="sector" className="text-sm opacity-70">Sector objetivo</Label>
-                          <Select
-                            value={formData.sector}
-                            onValueChange={(value) => setFormData({ ...formData, sector: value ?? "tech" })}
-                          >
-                            <SelectTrigger className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2" style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="border-none shadow-2xl" style={{ backgroundColor: THEME.card, color: THEME.text }}>
-                              <SelectItem value="tech">💻 Tecnología / Software</SelectItem>
-                              <SelectItem value="energía">⚡ Energía / Renovables</SelectItem>
-                              <SelectItem value="consultoría">📊 Consultoría</SelectItem>
-                              <SelectItem value="diseño">🎨 Diseño / Artesanía</SelectItem>
-                              <SelectItem value="otro">🌐 Otro Sector</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <Label htmlFor="industry" className="text-sm opacity-70">Sector</Label>
+                          <Input
+                            id="industry"
+                            type="text"
+                            placeholder="Ej: Tecnología, Salud, Finanzas..."
+                            value={formData.industry}
+                            onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
+                            className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
+                            style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
+                            required
+                          />
                         </div>
 
                         <div className="space-y-3">
-                          <Label htmlFor="years_min" className="text-sm opacity-70">Experiencia mínima</Label>
-                          <div className="relative">
-                             <Input
-                              id="years_min"
-                              type="number"
-                              min="0"
-                              value={formData.years_min}
-                              onChange={(e) => setFormData({ ...formData, years_min: e.target.value })}
-                              className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
-                              style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
-                            />
-                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs opacity-40">años</span>
-                          </div>
+                          <Label htmlFor="location" className="text-sm opacity-70">Localización</Label>
+                          <Input
+                            id="location"
+                            type="text"
+                            placeholder="Ej: Madrid, España, Remoto..."
+                            value={formData.location}
+                            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                            className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
+                            style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
+                            required
+                          />
                         </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Label htmlFor="keywords" className="text-sm opacity-70">Palabras clave (separadas por coma)</Label>
-                        <Input
-                          id="keywords"
-                          placeholder="ej: ebanista, diseño sostenible, carpintería"
-                          value={formData.keywords}
-                          onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
-                          className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
-                          style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
-                          required
-                        />
-                      </div>
-
-                      <div className="space-y-3">
-                        <Label htmlFor="location" className="text-sm opacity-70">Ubicación (opcional)</Label>
-                        <Input
-                          id="location"
-                          placeholder="ej: Galicia, España"
-                          value={formData.location}
-                          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                          className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
-                          style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
-                        />
                       </div>
 
                       {/* QUERY PREVIEW */}
@@ -752,10 +789,10 @@ export default function Dashboard() {
                                       href={contact.linkedin_url}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="inline-flex items-center justify-center w-8 h-8 rounded-full transition-all hover:scale-110 active:scale-90"
-                                      style={{ backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, color: THEME.info }}
+                                      className="text-blue-500 hover:text-blue-400 underline transition-colors text-xs flex items-center justify-end gap-1"
                                     >
-                                      <ExternalLink className="w-3.5 h-3.5" />
+                                      Ver Perfil
+                                      <ExternalLink className="w-3 h-3" />
                                     </a>
                                   </TableCell>
                                 </TableRow>

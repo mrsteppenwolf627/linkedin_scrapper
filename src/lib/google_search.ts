@@ -1,63 +1,59 @@
 // ============================================
-// LinkedIn Scraper V1 - Google Search via Serper.dev
+// LinkedIn Scraper V1 - SearchApi.io Engine (Google Proxy)
 // ============================================
 
 import type { GoogleSearchResult } from '@/types'
 
-interface SerperOrganicResult {
-  title: string
-  link: string
-  snippet: string
-  position?: number
-}
-
-interface SerperResponse {
-  organic?: SerperOrganicResult[]
-  searchParameters?: { q: string; num: number }
-  credits?: number
-}
-
 /**
- * Busca en Google usando Serper.dev y devuelve resultados orgánicos.
- * Filtra automáticamente para mantener solo URLs de linkedin.com
+ * Busca en Google usando la API de SearchApi.io y devuelve resultados orgánicos.
+ * SearchApi.io maneja el proxy y la rotación para evitar bloqueos.
  */
 export async function searchGoogle(
   query: string,
-  maxResults: number = 10
+  maxResults: number = 30
 ): Promise<GoogleSearchResult[]> {
-  const apiKey = process.env.SERPER_API_KEY
-  if (!apiKey) throw new Error('SERPER_API_KEY not set in environment')
+  const apiKey = process.env.SEARCHAPI_IO_KEY
+  
+  if (!apiKey) {
+    throw new Error('❌ SEARCHAPI_IO_KEY no configurada en .env.local')
+  }
 
-  const response = await fetch('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: {
-      'X-API-KEY': apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      q: query,
-      num: Math.min(maxResults, 100), // Serper max es 100
-      gl: 'es', // Google locale España para mejores resultados ES/EN
-      hl: 'es',
-    }),
+  // SearchApi.io API endpoint - Usando la clase URL
+  const url = new URL('https://www.searchapi.io/api/v1/search')
+  url.searchParams.append('engine', 'google')
+  url.searchParams.append('q', query)
+  url.searchParams.append('num', maxResults.toString())
+  url.searchParams.append('api_key', apiKey)
+  url.searchParams.append('gl', 'es') // Google locale España
+  url.searchParams.append('hl', 'es') // Idioma español
+
+  console.log(`🌐 [SearchApi] Realizando búsqueda para: "${query}"`)
+
+  // Cache: 'no-store' es crítica para asegurar resultados frescos y evitar bloqueos
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    cache: 'no-store'
   })
 
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(`Serper API error ${response.status}: ${errorText}`)
+    throw new Error(`🚨 SearchApi error ${response.status}: ${errorText}`)
   }
 
-  const data: SerperResponse = await response.json()
+  const data = await response.json()
+  
+  // SearchApi devuelve los resultados orgánicos en organic_results
+  const organicResults = data.organic_results || []
 
-  const results: GoogleSearchResult[] =
-    data.organic?.map((result) => ({
-      title: result.title || '',
-      link: result.link || '',
-      snippet: result.snippet || '',
-    })) ?? []
+  // Mapeo respetando la interfaz original
+  const results: GoogleSearchResult[] = organicResults.map((item: any) => ({
+    title: item.title || '',
+    link: item.link || '',
+    snippet: item.snippet || '',
+  }))
 
   console.log(
-    `[Google Search] Query: "${query}" → ${results.length} resultados`
+    `✨ [SearchApi Search] Query: "${query}" → ${results.length} resultados orgánicos encontrados`
   )
 
   return results

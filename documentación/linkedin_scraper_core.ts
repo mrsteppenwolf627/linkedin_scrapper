@@ -46,31 +46,23 @@ async function searchGoogle(
   query: string,
   maxResults: number = 10
 ): Promise<GoogleSearchResult[]> {
-  // Opción A: Google Custom Search API (requiere setup)
-  // Opción B: Serper.dev (más simple)
-  // Opción C: SerpAPI
-
-  const apiKey = process.env.SERPER_API_KEY;
-  if (!apiKey) throw new Error("SERPER_API_KEY not found");
+  const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
+  const cx = process.env.GOOGLE_SEARCH_CX;
+  if (!apiKey || !cx) throw new Error("Google Search API credentials not found");
 
   try {
-    const response = await fetch("https://google.serper.dev/search", {
-      method: "POST",
-      headers: {
-        "X-API-KEY": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        q: query,
-        num: maxResults,
-        gl: "es", // Google locale Spain
-      }),
-    });
+    const url = new URL("https://www.googleapis.com/customsearch/v1");
+    url.searchParams.append("key", apiKey);
+    url.searchParams.append("cx", cx);
+    url.searchParams.append("q", query);
+    url.searchParams.append("num", Math.min(maxResults, 10).toString());
+    url.searchParams.append("gl", "es");
 
+    const response = await fetch(url.toString());
     const data = await response.json();
 
     return (
-      data.organic?.map((result: any) => ({
+      data.items?.map((result: any) => ({
         title: result.title || "",
         link: result.link || "",
         snippet: result.snippet || "",

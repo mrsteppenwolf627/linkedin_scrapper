@@ -114,20 +114,17 @@ DATOS EXTRAÍDOS: ${JSON.stringify(contact)}
 ${rawText ? `TEXTO COMPLETO DEL PERFIL: "${rawText}"` : ''}
 
 FILTROS:
-- Sector: ${filters.sector}
-- Años mínimos: ${filters.years_min}
-- Keywords: ${filters.keywords.join(', ')}
-- Ubicación requerida: ${filters.location ?? 'No especificada'}
+- Puesto: ${filters.jobTitle}
+- Experiencia: ${filters.experience}
+- Sector: ${filters.industry}
+- Ubicación: ${filters.location}
 
 Criterios para is_valid = true:
 1. es_valido del contacto es true
-2. anos_experiencia >= ${filters.years_min} — si es null, NO rechazar
-3. Al menos 1 keyword aparece en el TEXTO COMPLETO (no solo campos extraídos). Acepta equivalentes multilingüe:
-   "consultor/a" = consultant, consulting, consultancy, advisor, asesor
-   "energía" = energy, energético, renewables, renewable, clean energy, solar, eólica, wind
-   "solar" = solar, photovoltaic, PV, fotovoltaica
-4. El sector "${filters.sector}" tiene relación semántica con el perfil
-5. Ubicación: solo rechazar si la ubicación del contacto es explícita Y claramente fuera de ${filters.location ?? 'España'}. Si es null → NO rechazar.
+2. El título del contacto o su snippet tiene relación semántica clara con el puesto "${filters.jobTitle}"
+3. La experiencia del contacto encaja con el criterio "${filters.experience}".
+4. El sector "${filters.industry}" tiene relación semántica con el perfil
+5. Ubicación: solo rechazar si la ubicación del contacto es explícita Y claramente fuera de "${filters.location}". Si es ambiguo → NO rechazar.
 
 score_cumplimiento: 0.25 por criterio cumplido.`,
       },
@@ -219,31 +216,30 @@ export async function generateGoogleQuery(filters: SearchFilters): Promise<strin
       {
         role: 'system',
         content:
-          'Generas queries de Google para encontrar perfiles de LinkedIn. Respondes SOLO con la query, sin explicaciones ni comillas.',
+          'Generas queries de Google efectivas para encontrar perfiles de LinkedIn. Respondes SOLO con la query limpia, sin bloques de código ni explicaciones.',
       },
       {
         role: 'user',
-        content: `Genera una query de Google para estos filtros:
-- Sector: ${filters.sector}
-- Años mínimos: ${filters.years_min}
-- Keywords: ${filters.keywords.join(', ')}
-- Ubicación: ${filters.location ?? 'España'}
+        content: `Crea una búsqueda de Google para encontrar estos perfiles en LinkedIn:
+- Puesto: ${filters.jobTitle}
+- Sector: ${filters.industry}
+- Ubicación: ${filters.location}
 
-Reglas:
-1. Empieza siempre con: site:linkedin.com/in
-2. Incluye variaciones ES e EN de cada keyword con OR
-3. Años: ${filters.years_min}+ años OR ${filters.years_min}+ years
-4. Añade ubicación al final
-5. Usa paréntesis para agrupar variaciones
-6. Máximo 10 términos
-7. MUY IMPORTANTE: NO uses comillas dobles en ninguna parte de la query
+Reglas CRÍTICAS:
+1. Empieza SIEMPRE con el operador: site:linkedin.com/in/
+2. Ignora completamente los años de experiencia para esta query (se filtrarán después).
+3. Incluye solo el puesto, el sector y la localización.
+4. Usa comillas para términos compuestos si es necesario.
+5. NO uses el operador intitle.
 
-Ejemplo: site:linkedin.com/in (consultor OR consultant) (energía OR energy) (5+ años OR 5+ years) España`,
+Ejemplo de salida: site:linkedin.com/in/ "Director de Marketing" "Salud" Madrid`,
       },
     ],
   })
 
   const text = response.choices[0].message.content ?? ''
-  // Eliminar comillas externas Y comillas internas — Serper las rechaza con site:
-  return text.trim().replace(/^["']|["']$/g, '').replace(/"/g, '')
+  
+  return text.trim()
+    .replace(/^["']|["']$/g, '') 
+    .replace(/\s+/g, ' '); 
 }

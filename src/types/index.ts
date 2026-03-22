@@ -4,10 +4,10 @@
 
 // --- Filtros de búsqueda ---
 export interface SearchFilters {
-  sector: string
-  years_min: number
-  keywords: string[]
-  location?: string
+  jobTitle: string
+  experience: string
+  industry: string
+  location: string
 }
 
 // --- Resultado de Google Search ---
