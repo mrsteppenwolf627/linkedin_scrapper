@@ -10,6 +10,15 @@ import type { ContactsListResponse, ApiError } from '@/types'
 export async function GET(
   req: NextRequest
 ): Promise<NextResponse<ContactsListResponse | ApiError>> {
+  // --- Auth ---
+  const apiKey = req.headers.get('x-api-key')
+  if (!apiKey || apiKey !== process.env.SEARCH_API_KEY) {
+    return NextResponse.json(
+      { error: 'Unauthorized', message: 'API key inválida o ausente' },
+      { status: 401 }
+    )
+  }
+
   const { searchParams } = new URL(req.url)
 
   // Parámetros de consulta
@@ -68,6 +77,15 @@ export async function GET(
 export async function PATCH(
   req: NextRequest
 ): Promise<NextResponse<{ success: boolean } | ApiError>> {
+  // --- Auth ---
+  const apiKey = req.headers.get('x-api-key')
+  if (!apiKey || apiKey !== process.env.SEARCH_API_KEY) {
+    return NextResponse.json(
+      { error: 'Unauthorized', message: 'API key inválida o ausente' },
+      { status: 401 }
+    )
+  }
+
   const { searchParams } = new URL(req.url)
   const contactId = searchParams.get('id')
 

@@ -185,19 +185,46 @@ export async function executeLinkedInSearch(
   const results: ContactRecord[] = []
 
   try {
-    // --- PASO 2: Buscar en Google ---
-    console.log(`\n🌐 [Scraper] Buscando en Google...`)
-    const allGoogleResults = await searchGoogle(googleQuery, maxResults)
-    const googleResults = filterLinkedInProfiles(allGoogleResults)
+    // --- PASO 2: Buscar en Google (con paginación) ---
+    console.log(`\n🌐 [Scraper] Buscando en Google (máximo ${maxResults} perfiles)...`)
+    
+    let googleResults: any[] = []
+    let allGoogleResults: any[] = []
+    let page = 1
+    const MAX_PAGES = 5
+
+    while (googleResults.length < maxResults && page <= MAX_PAGES) {
+      // Pedimos de 100 en 100 para maximizar cada llamada a la API
+      const pageResults = await searchGoogle(googleQuery, 100, page)
+      if (pageResults.length === 0) break // No hay más resultados en Google
+
+      allGoogleResults = [...allGoogleResults, ...pageResults]
+      const linkedinInPage = filterLinkedInProfiles(pageResults)
+      
+      // Añadir solo los que no tengamos ya (por URL)
+      for (const res of linkedinInPage) {
+        if (!googleResults.find(r => normalizeLinkedInUrl(r.link) === normalizeLinkedInUrl(res.link))) {
+          googleResults.push(res)
+        }
+      }
+
+      console.log(`   [Scraper] Página ${page}: ${pageResults.length} total, ${linkedinInPage.length} LinkedIn. Acumulado: ${googleResults.length}/${maxResults}`)
+      
+      if (googleResults.length >= maxResults) break
+      page++
+    }
+
+    // Limitar a los solicitados
+    googleResults = googleResults.slice(0, maxResults)
 
     console.log(
-      `[Scraper] Google: ${allGoogleResults.length} total, ${googleResults.length} perfiles LinkedIn válidos`
+      `[Scraper] Final: ${allGoogleResults.length} escaneados en Google, ${googleResults.length} perfiles LinkedIn únicos para procesar`
     )
 
     // Actualizar conteo de resultados Google
     await supabase
       .from('searches')
-      .update({ total_results_google: allGoogleResults.length })
+      .update({ total_results_google: googleResults.length })
       .eq('id', searchId)
 
     // --- PASO 3: Procesar cada resultado ---

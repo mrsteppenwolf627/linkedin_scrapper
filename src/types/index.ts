@@ -8,6 +8,7 @@ export interface SearchFilters {
   experience: string
   industry: string
   location: string
+  maxResults?: number
 }
 
 // --- Resultado de Google Search ---

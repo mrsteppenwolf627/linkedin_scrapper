@@ -10,6 +10,15 @@ import type { SearchesListResponse, ApiError } from '@/types'
 export async function GET(
   req: NextRequest
 ): Promise<NextResponse<SearchesListResponse | ApiError>> {
+  // --- Auth ---
+  const apiKey = req.headers.get('x-api-key')
+  if (!apiKey || apiKey !== process.env.SEARCH_API_KEY) {
+    return NextResponse.json(
+      { error: 'Unauthorized', message: 'API key inválida o ausente' },
+      { status: 401 }
+    )
+  }
+
   try {
     const { searchParams } = new URL(req.url)
     const statusFilter = searchParams.get('status') // pending | running | completed | failed

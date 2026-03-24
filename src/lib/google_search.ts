@@ -10,7 +10,8 @@ import type { GoogleSearchResult } from '@/types'
  */
 export async function searchGoogle(
   query: string,
-  maxResults: number = 30
+  maxResults: number = 30,
+  page: number = 1
 ): Promise<GoogleSearchResult[]> {
   const apiKey = process.env.SEARCHAPI_IO_KEY
   
@@ -23,11 +24,12 @@ export async function searchGoogle(
   url.searchParams.append('engine', 'google')
   url.searchParams.append('q', query)
   url.searchParams.append('num', maxResults.toString())
+  url.searchParams.append('page', page.toString())
   url.searchParams.append('api_key', apiKey)
   url.searchParams.append('gl', 'es') // Google locale España
   url.searchParams.append('hl', 'es') // Idioma español
 
-  console.log(`🌐 [SearchApi] Realizando búsqueda para: "${query}"`)
+  console.log(`🌐 [SearchApi] Realizando búsqueda para: "${query}" (Página ${page})`)
 
   // Cache: 'no-store' es crítica para asegurar resultados frescos y evitar bloqueos
   const response = await fetch(url.toString(), {

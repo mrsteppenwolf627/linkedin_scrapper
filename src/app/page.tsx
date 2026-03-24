@@ -56,6 +56,7 @@ interface FormData {
   experience: string;
   industry: string;
   location: string;
+  maxResults: number;
 }
 
 // --- WABI-SABI THEME COLORS (Arbitrary Tailwind classes) ---
@@ -97,6 +98,7 @@ export default function Dashboard() {
     experience: "",
     industry: "",
     location: "",
+    maxResults: 20,
   });
 
   // === GOOGLE QUERY PREVIEW ===
@@ -108,13 +110,13 @@ export default function Dashboard() {
     return `inurl:linkedin.com/in/ intitle:"LinkedIn" ${jobTitle} ${experience} ${industry} ${location}`.trim();
   }, [formData]);
 
-  // === CARGAR BÚSQUEDAS ===
-  const loadSearches = useCallback(async (isSilent = false) => {
-    if (!isSilent) setRefreshing(true);
+  // === CARGAR HISTORIAL ===
+  const loadSearches = useCallback(async () => {
+    setRefreshing(true);
     try {
       const response = await fetch("/api/searches", {
         headers: {
-          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY || "",
+          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY ?? "",
         },
       });
 
@@ -122,69 +124,14 @@ export default function Dashboard() {
 
       const data = await response.json();
       setSearches(data.searches ?? []);
-      return data.searches as Search[];
     } catch (error) {
       console.error("Error loading searches:", error);
-      if (!isSilent) toast.error("Error al cargar el historial");
-      return [];
+      toast.error("Error al cargar el historial de búsquedas");
     } finally {
-      if (!isSilent) setRefreshing(false);
+      setRefreshing(false);
     }
   }, []);
 
-  // === POLLING STATUS ===
-  const pollStatus = useCallback(async (searchId: string) => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/status?search_id=${searchId}`, {
-          headers: { "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY || "" }
-        });
-        if (!res.ok) throw new Error("Status check failed");
-        
-        const data = await res.json();
-        const s = data.search;
-        
-        setProgress({
-          processed: s.total_results_processed,
-          created: s.total_contacts_created,
-          duplicates: s.total_duplicates_found,
-          invalid: s.total_invalid,
-          status: s.status
-        });
-
-        if (s.status !== 'running') {
-          clearInterval(interval);
-          setActiveSearchId(null);
-          loadSearches(true);
-          if (s.status === 'completed') {
-            toast.success(`Búsqueda completada: ${s.total_contacts_created} contactos creados`, {
-              style: { background: THEME.card, color: THEME.success, border: `1px solid ${THEME.border}` }
-            });
-          } else {
-            toast.error(`Búsqueda finalizada con error`, {
-              style: { background: THEME.card, color: THEME.error, border: `1px solid ${THEME.border}` }
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Polling error:", err);
-      }
-    }, 5000);
-    return interval;
-  }, [loadSearches]);
-
-  // Polling automático para búsquedas en curso en el historial
-  useEffect(() => {
-    const runningSearches = searches.filter(s => s.status === 'running');
-    if (runningSearches.length > 0) {
-      const interval = setInterval(() => {
-        loadSearches(true);
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [searches, loadSearches]);
-
-  // Cargar búsquedas al iniciar
   useEffect(() => {
     loadSearches();
   }, [loadSearches]);
@@ -204,7 +151,7 @@ export default function Dashboard() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY || "",
+          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY ?? "",
         },
         body: JSON.stringify({
           search_name: generatedName,
@@ -213,93 +160,82 @@ export default function Dashboard() {
             experience: formData.experience,
             industry: formData.industry,
             location: formData.location,
+            maxResults: formData.maxResults,
           },
-          max_results: 30,
+          max_results: formData.maxResults,
         }),
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.message || `API error: ${response.statusText}`);
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Error al iniciar la búsqueda");
       }
 
-      // --- CONSUMO DEL STREAM (SSE) ---
+      // --- SSE Stream Handling ---
       const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error("No se pudo iniciar el stream de datos");
+      if (!reader) throw new Error("No se pudo obtener el reader del stream");
 
-      let buffer = '';
-      const STATUS_TOAST_ID = "search-status-toast";
+      setProgress({ processed: 0, created: 0, duplicates: 0, invalid: 0, status: "starting" });
+      setContacts([]); // Clear previous contacts for real-time view
+      
+      const decoder = new TextDecoder();
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        
-        // El formato SSE separa eventos por \n\n
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-        for (const part of parts) {
-          if (!part.trim()) continue;
+        let currentEvent = "";
 
-          // Extraer event y data de la parte
-          const lines = part.split('\n');
-          let event = 'message';
-          let data = '';
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.replace("event: ", "").trim();
+          } else if (line.startsWith("data: ")) {
+            const dataStr = line.replace("data: ", "").trim();
+            try {
+              const data = JSON.parse(dataStr);
 
-          for (const line of lines) {
-            if (line.startsWith('event:')) event = line.replace('event:', '').trim();
-            if (line.startsWith('data:')) data = line.replace('data:', '').trim();
-          }
-
-          if (!data) continue;
-          const parsedData = JSON.parse(data);
-
-          switch (event) {
-            case 'search_created':
-              setActiveSearchId(parsedData.search_id);
-              setSelectedSearch(parsedData.search_id);
-              setContacts([]); // Limpiar tabla
-              setProgress({ processed: 0, created: 0, duplicates: 0, invalid: 0, status: 'running' });
-              break;
-
-            case 'status':
-              toast.info(parsedData.message, { 
-                id: STATUS_TOAST_ID, // ID fijo para actualizar el mismo toast
-                style: { background: THEME.card, color: THEME.primary, border: `1px solid ${THEME.border}` }
-              });
-              break;
-
-            case 'lead_found':
-              const lead = parsedData as Contact;
-              setContacts(prev => [lead, ...prev]);
-              setProgress(prev => prev ? ({ ...prev, created: prev.created + 1 }) : null);
-              break;
-
-            case 'done':
-              setLoading(false);
-              toast.success(`Búsqueda completada: ${parsedData.total_created} leads generados`, {
-                id: STATUS_TOAST_ID // Reutilizamos el ID para cerrar el flujo positivamente
-              });
-              loadSearches(true);
-              break;
-
-            case 'error':
-              setLoading(false);
-              toast.error(`Error: ${parsedData.message}`, { id: STATUS_TOAST_ID });
-              break;
+              switch (currentEvent) {
+                case "search_created":
+                  setActiveSearchId(data.search_id);
+                  setSelectedSearch(data.search_id);
+                  break;
+                case "status":
+                  setProgress(prev => prev ? { ...prev, status: data.message } : null);
+                  break;
+                case "lead_found":
+                  setContacts(prev => [data, ...prev]);
+                  setProgress(prev => prev ? { ...prev, created: prev.created + 1, processed: prev.processed + 1 } : null);
+                  break;
+                case "done":
+                  toast.success(`Búsqueda completada: ${data.total_created} leads encontrados`, {
+                    style: { background: THEME.card, color: THEME.success, border: `1px solid ${THEME.border}` }
+                  });
+                  setActiveSearchId(null);
+                  loadSearches();
+                  break;
+                case "error":
+                  toast.error(`Error en el stream: ${data.message}`);
+                  setActiveSearchId(null);
+                  break;
+              }
+            } catch (e) {
+              console.error("Error parsing SSE data:", e);
+            }
           }
         }
       }
 
       setFormData({
-        search_name: "",
-        sector: "tech",
-        years_min: "5",
-        keywords: "",
+        jobTitle: "",
+        experience: "",
+        industry: "",
         location: "",
+        maxResults: 20,
       });
 
     } catch (error: any) {
@@ -315,7 +251,7 @@ export default function Dashboard() {
     try {
       const response = await fetch(`/api/contacts?search_id=${searchId}`, {
         headers: {
-          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY || "",
+          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY ?? "",
         },
       });
 
@@ -340,7 +276,7 @@ export default function Dashboard() {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY || "",
+          "x-api-key": process.env.NEXT_PUBLIC_SEARCH_API_KEY ?? "",
         },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -550,6 +486,30 @@ export default function Dashboard() {
                             required
                           />
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-3">
+                          <Label htmlFor="maxResults" className="text-sm opacity-70">Cantidad de resultados</Label>
+                          <Select
+                            value={formData.maxResults.toString()}
+                            onValueChange={(val) => setFormData({ ...formData, maxResults: parseInt(val) })}
+                          >
+                            <SelectTrigger 
+                              className="py-6 rounded-xl border-none ring-1 ring-inset focus:ring-2"
+                              style={{ backgroundColor: THEME.bg, color: THEME.text, '--tw-ring-color': THEME.border } as any}
+                            >
+                              <SelectValue placeholder="Selecciona cantidad" />
+                            </SelectTrigger>
+                            <SelectContent style={{ backgroundColor: THEME.card, color: THEME.text, borderColor: THEME.border }}>
+                              <SelectItem value="10">10 resultados</SelectItem>
+                              <SelectItem value="20">20 resultados</SelectItem>
+                              <SelectItem value="30">30 resultados</SelectItem>
+                              <SelectItem value="50">50 resultados</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="hidden md:block"></div>
                       </div>
 
                       {/* QUERY PREVIEW */}
