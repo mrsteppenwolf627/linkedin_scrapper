@@ -269,6 +269,242 @@ export default function Dashboard() {
     toast.success("EXPORT: SUCCESSFUL");
   };
 
+  // === GENERAR CONTENIDO HTML PARA EXPORTACIÓN (Compartido por HTML y PDF) ===
+  const generateHTMLContent = (data: Contact[]) => {
+    const sanitize = (val: any) => {
+      if (val === null || val === undefined || val === "" || val === "null") return "—";
+      return String(val);
+    };
+
+    const avgConfidence = (data.reduce((acc, c) => acc + (c.confidence_score || 0), 0) / data.length * 100).toFixed(0);
+    const timestamp = new Date().toLocaleString();
+
+    const rowsHtml = data.map((c, i) => {
+      const confidence = (c.confidence_score * 100);
+      const confColor = confidence >= 90 ? "#4A7C59" : confidence >= 70 ? "#D94F00" : "#6B6B5E";
+      const linkedInUrl = c.linkedin_url.startsWith("http") ? c.linkedin_url : `https://${c.linkedin_url}`;
+
+      return `
+        <tr class="lead-row">
+          <td class="col-num">${i + 1}</td>
+          <td class="col-name">
+            <strong>${sanitize(c.name)}</strong>
+            <span class="lead-url-print">${linkedInUrl}</span>
+          </td>
+          <td class="col-role">
+            <div class="role-text"><strong>${sanitize(c.job_title)}</strong></div>
+            <div class="company-text">${sanitize(c.company)}</div>
+          </td>
+          <td class="col-loc">${sanitize(c.location)}</td>
+          <td class="col-exp">${sanitize(c.years_experience)} yr</td>
+          <td class="col-conf">
+            <div class="conf-value" style="color: ${confColor}">${confidence.toFixed(0)}%</div>
+            <div class="conf-bar-bg">
+              <div class="conf-bar-fill" style="width: ${confidence}%; background-color: ${confColor}"></div>
+            </div>
+          </td>
+          <td class="col-action">
+            <a href="${linkedInUrl}" target="_blank" class="btn-profile">VIEW_PROFILE →</a>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WABI-SABI.SYS | LEAD_REPORT</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Courier New', Courier, monospace; 
+            background-color: #F0EDE4; 
+            color: #1A1A1A; 
+            padding: 40px;
+            line-height: 1.4;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background-color: #F0EDE4;
+            border: 3px solid #1A1A1A;
+            box-shadow: 8px 8px 0px #1A1A1A;
+        }
+        header {
+            padding: 30px;
+            border-bottom: 3px solid #1A1A1A;
+            background-color: #E8E4DB;
+        }
+        .logo { font-size: 24px; font-weight: 900; letter-spacing: -1px; }
+        .gen-date { font-size: 10px; opacity: 0.6; margin-top: 4px; }
+        .stats-bar {
+            margin-top: 20px;
+            display: flex;
+            gap: 30px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .stat-item span { color: #D94F00; }
+        
+        table { width: 100%; border-collapse: collapse; background-color: white; }
+        th { 
+            background-color: #1A1A1A; 
+            color: #F0EDE4; 
+            text-align: left; 
+            padding: 12px 15px;
+            font-size: 10px;
+            letter-spacing: 2px;
+        }
+        .lead-row { border-bottom: 1px solid rgba(26,26,26,0.1); transition: all 0.2s; }
+        .lead-row:nth-child(even) { background-color: #F0EDE4; }
+        .lead-row:nth-child(odd) { background-color: #E8E4DB; }
+        .lead-row:hover { background-color: #1A1A1A !important; color: #F0EDE4 !important; }
+        .lead-row:hover .company-text { color: #F0EDE4; opacity: 0.6; }
+        .lead-row:hover .btn-profile { color: #F0EDE4; border-color: #F0EDE4; }
+
+        td { padding: 15px; font-size: 13px; vertical-align: middle; }
+        .col-num { width: 40px; opacity: 0.4; font-size: 10px; }
+        .col-name { width: 180px; }
+        .col-role { width: 250px; }
+        .company-text { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+        .col-exp { font-size: 12px; }
+        .col-conf { width: 120px; }
+        .conf-value { font-weight: bold; margin-bottom: 4px; font-size: 11px; }
+        .conf-bar-bg { height: 4px; background: rgba(0,0,0,0.1); border-radius: 2px; overflow: hidden; }
+        .conf-bar-fill { height: 100%; }
+        
+        .btn-profile {
+            display: inline-block;
+            text-decoration: none;
+            color: #D94F00;
+            font-weight: bold;
+            font-size: 11px;
+            border: 1px solid #D94F00;
+            padding: 5px 10px;
+            transition: all 0.2s;
+        }
+        
+        footer {
+            padding: 40px;
+            text-align: center;
+            font-size: 10px;
+            opacity: 0.4;
+            letter-spacing: 1px;
+        }
+
+        .lead-url-print {
+          display: none;
+        }
+
+        @media print {
+            @page {
+                size: A4 landscape;
+                margin: 15mm 10mm;
+            }
+
+            body {
+                background: #F0EDE4 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                padding: 0;
+            }
+
+            .container { border: none; box-shadow: none; max-width: 100%; }
+
+            header {
+                page-break-after: avoid;
+            }
+
+            tr {
+                page-break-inside: avoid;
+            }
+
+            th:last-child,
+            td:last-child {
+                display: none;
+            }
+
+            .lead-url-print {
+                display: block !important;
+                font-size: 8px;
+                color: #D94F00;
+                word-break: break-all;
+                margin-top: 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">WABI-SABI.SYS — LEAD_EXPORT_REPORT</div>
+            <div class="gen-date">GENERATED: ${timestamp}</div>
+            <div class="stats-bar">
+                <div class="stat-item">TOTAL_LEADS: <span>${data.length}</span></div>
+                <div class="stat-item">AVG_CONFIDENCE: <span>${avgConfidence}%</span></div>
+                <div class="stat-item">STATUS: <span>COMPLETED</span></div>
+            </div>
+        </header>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>FULL_NAME</th>
+                    <th>ROLE_COMPANY</th>
+                    <th>LOCATION</th>
+                    <th>EXP</th>
+                    <th>CONFIDENCE</th>
+                    <th>ACTION</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rowsHtml}
+            </tbody>
+        </table>
+        <footer>
+            <p>WABI-SABI.SYS © 2026 — CONFIDENTIAL_LEAD_DATA</p>
+            <p>POWERED BY AI_VALIDATION_ENGINE // GPT-4O-MINI</p>
+        </footer>
+    </div>
+</body>
+</html>
+    `;
+  };
+
+  const generateHTML = () => {
+    if (contacts.length === 0) return;
+    const htmlContent = generateHTMLContent(contacts);
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `REPORT_EXPORT_${selectedSearch}.html`;
+    a.click();
+    toast.success("EXPORT: HTML_SUCCESSFUL");
+  };
+
+  const exportPDF = () => {
+    if (contacts.length === 0) return;
+    const htmlContent = generateHTMLContent(contacts);
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Permite las ventanas emergentes para exportar PDF');
+      return;
+    }
+    
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.print();
+      }, 300);
+    };
+  };
+
   return (
     <div className="flex flex-col h-screen overflow-hidden font-mono text-[#1A1A1A] bg-[#F0EDE4]">
       
@@ -450,9 +686,17 @@ export default function Dashboard() {
                       <div className="border-t-2 border-[#1A1A1A] p-6 bg-[#F0EDE4] animate-in slide-in-from-top-4">
                         <div className="flex items-center justify-between mb-6">
                            <h3 className="text-sm font-black tracking-widest underline underline-offset-4 uppercase">DETAILED_LEAD_REPORT</h3>
-                           <button onClick={downloadCSV} className="bg-[#4A7C59] text-white px-4 py-2 border-2 border-[#1A1A1A] text-[10px] font-bold hover:bg-[#1A1A1A] transition-colors flex items-center gap-2 shadow-[3px_3px_0px_#1A1A1A] uppercase">
-                             <Download className="w-3 h-3" /> EXPORT_CSV
-                           </button>
+                           <div className="flex gap-4">
+                             <button onClick={downloadCSV} className="bg-[#4A7C59] text-white px-4 py-2 border-2 border-[#1A1A1A] text-[10px] font-bold hover:bg-[#1A1A1A] transition-colors flex items-center gap-2 shadow-[3px_3px_0px_#1A1A1A] uppercase">
+                               <Download className="w-3 h-3" /> EXPORT_CSV
+                             </button>
+                             <button onClick={generateHTML} className="bg-[#D94F00] text-white px-4 py-2 border-2 border-[#1A1A1A] text-[10px] font-bold hover:bg-[#1A1A1A] transition-colors flex items-center gap-2 shadow-[3px_3px_0px_#1A1A1A] uppercase">
+                               <Download className="w-3 h-3" /> EXPORT_HTML
+                             </button>
+                             <button onClick={exportPDF} className="bg-[#1A1A1A] text-white px-4 py-2 border-2 border-[#1A1A1A] text-[10px] font-bold hover:bg-[#D94F00] transition-colors flex items-center gap-2 shadow-[3px_3px_0px_#1A1A1A] uppercase">
+                               <Download className="w-3 h-3" /> EXPORT_PDF
+                             </button>
+                           </div>
                         </div>
                         
                         <div className="overflow-x-auto">
