@@ -101,6 +101,75 @@ export interface ContactRecord {
   raw_validation_result?: ValidatedContact
 }
 
+// --- Message Generator ---
+export interface LeadInput {
+  name: string
+  title: string
+  company: string
+  industry: string
+  location: string
+  linkedin_url: string
+  profile_snippet?: string
+  your_product?: string  // Required for single endpoint; omitted in batch mode
+}
+
+export type MessageSequence = 1 | 2 | 3
+
+export interface MessageDraft {
+  draft_id: number
+  sequence: MessageSequence
+  text: string
+  confidence: number
+}
+
+export interface TokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface GenerateMessagesResponse {
+  drafts: MessageDraft[]
+  usage: TokenUsage
+}
+
+// API response includes the persisted lead_id from Supabase
+export interface GenerateMessagesApiResponse {
+  lead_id: string
+  drafts: MessageDraft[]
+}
+
+export interface GenerateMessagesRequestBody extends LeadInput {
+  lead_id?: string // Optional: future use — link to an existing lead record
+}
+
+// --- Batch Message Generation ---
+
+export interface BatchGenerateRequestBody {
+  search_id: string
+  your_product?: string
+}
+
+export interface BatchItemResult {
+  contact_id: string
+  contact_name: string
+  status: 'ok' | 'failed'
+  lead_id?: string
+  error?: string
+  usage?: TokenUsage
+}
+
+export interface BatchGenerateResult {
+  search_id: string
+  total_contacts: number
+  processed: number
+  failed: number
+  cost_total_usd: number
+  time_ms: number
+  items: BatchItemResult[]
+}
+
 // --- Respuestas API ---
 export interface ApiError {
   error: string
