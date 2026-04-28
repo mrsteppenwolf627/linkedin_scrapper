@@ -3,6 +3,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Loader2, Download, RefreshCw, Search as SearchIcon, ExternalLink, Activity } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
+import { LeadForm, LeadData } from "@/components/LeadForm";
+import { DraftDisplay, Draft } from "@/components/DraftDisplay";
 
 // --- TYPES ---
 interface Search {
@@ -49,7 +52,7 @@ const THEME = {
 };
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<"create" | "history">("create");
+  const [activeTab, setActiveTab] = useState<"create" | "history" | "messages">("create");
   const [searches, setSearches] = useState<Search[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedSearch, setSelectedSearch] = useState<string | null>(null);
@@ -76,6 +79,36 @@ export default function Dashboard() {
     location: "",
     maxResults: 20,
   });
+
+  // === MESSAGES STATE ===
+  const [messageDrafts, setMessageDrafts] = useState<Draft[]>([]);
+  const [isGeneratingMessages, setIsGeneratingMessages] = useState(false);
+
+  const handleGenerateMessages = async (data: LeadData) => {
+    setIsGeneratingMessages(true);
+    setMessageDrafts([]);
+    try {
+      const response = await fetch("/api/generate-messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "ERROR_GENERATING_MESSAGES");
+      }
+      const result = await response.json();
+      setMessageDrafts(result.drafts || []);
+      toast.success("MESSAGES_GENERATED_SUCCESSFULLY");
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`ERROR: ${error.message}`);
+    } finally {
+      setIsGeneratingMessages(false);
+    }
+  };
 
   // --- SYSTEM CLOCK ---
   useEffect(() => {
@@ -508,19 +541,21 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen overflow-hidden font-mono text-[#1A1A1A] bg-[#F0EDE4]">
       
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
         
         {/* SIDEBAR IZQUIERDO */}
-        <aside className="w-[220px] flex-shrink-0 bg-[#E8E4DB] border-r-2 border-[#1A1A1A] flex flex-col p-6 space-y-8">
-          <div className="space-y-1">
-            <h1 className="text-xl font-black leading-tight tracking-tighter uppercase">WABI-SABI.SYS</h1>
-            <p className="text-[10px] opacity-60">TERMINAL_V1.2_BUILD</p>
+        <aside className="w-full md:w-[220px] flex-shrink-0 bg-[#E8E4DB] border-b-2 md:border-b-0 md:border-r-2 border-[#1A1A1A] flex flex-col p-4 md:p-6 space-y-4 md:space-y-8 z-10">
+          <div className="space-y-1 flex justify-between items-center md:block">
+            <div>
+              <h1 className="text-xl font-black leading-tight tracking-tighter uppercase">WABI-SABI.SYS</h1>
+              <p className="text-[10px] opacity-60">TERMINAL_V1.2_BUILD</p>
+            </div>
           </div>
 
-          <nav className="flex-1 space-y-4">
+          <nav className="flex flex-row md:flex-col gap-2 overflow-x-auto pb-2 md:pb-0 md:space-y-4">
             <button
               onClick={() => setActiveTab("create")}
-              className={`w-full text-left px-4 py-3 border-2 transition-all font-bold text-sm ${
+              className={`whitespace-nowrap md:whitespace-normal md:w-full text-left px-4 py-3 border-2 transition-all font-bold text-sm ${
                 activeTab === "create" ? "bg-white border-[#D94F00] shadow-[4px_4px_0px_#D94F00]" : "border-[#1A1A1A] hover:bg-[#F0EDE4]"
               }`}
             >
@@ -528,15 +563,26 @@ export default function Dashboard() {
             </button>
             <button
               onClick={() => setActiveTab("history")}
-              className={`w-full text-left px-4 py-3 border-2 transition-all font-bold text-sm ${
+              className={`whitespace-nowrap md:whitespace-normal md:w-full text-left px-4 py-3 border-2 transition-all font-bold text-sm ${
                 activeTab === "history" ? "bg-white border-[#D94F00] shadow-[4px_4px_0px_#D94F00]" : "border-[#1A1A1A] hover:bg-[#F0EDE4]"
               }`}
             >
               VER_RESULTADOS
             </button>
+            <Link
+              href="/searches"
+              className={`whitespace-nowrap md:whitespace-normal md:w-full text-left px-4 py-3 border-2 transition-all font-bold text-sm border-[#1A1A1A] hover:bg-[#D94F00] hover:text-white flex items-center gap-2`}
+            >
+              🚀 GENERAR MENSAJES
+            </Link>
+            <Link
+              href="/messages"
+              className={`whitespace-nowrap md:whitespace-normal md:w-full text-left px-4 py-3 border-2 transition-all font-bold text-sm border-[#1A1A1A] hover:bg-[#D94F00] hover:text-white flex items-center gap-2`}
+            >
+              📧 MIS MENSAJES
+            </Link>
           </nav>
-
-          <div className="text-[10px] space-y-1 border-t-2 border-[#1A1A1A] pt-4 opacity-70">
+          <div className="text-[10px] space-y-1 border-t-2 border-[#1A1A1A] pt-4 opacity-70 hidden md:block">
             <div>KERNEL: <span className="text-[#4A7C59]">STABLE_OK</span></div>
             <div>SCAN_LOC: GLOBAL</div>
             <div>SYS_TIME: {systemTime}</div>
@@ -544,7 +590,7 @@ export default function Dashboard() {
         </aside>
 
         {/* ÁREA CENTRAL */}
-        <main className="flex-1 overflow-y-auto p-10 relative">
+        <main className="flex-1 overflow-y-auto p-4 md:p-10 relative">
           
           {/* BANNER DE PROGRESO (LIVE) */}
           {activeSearchId && progress && (
@@ -651,7 +697,7 @@ export default function Dashboard() {
                 </button>
               </form>
             </div>
-          ) : (
+          ) : activeTab === "history" ? (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
               <div className="border-b-4 border-[#1A1A1A] pb-4 flex items-center justify-between">
                 <h2 className="text-3xl font-black italic tracking-tighter uppercase">SCAN_HISTORY_LOG</h2>
@@ -743,6 +789,14 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
+              <div className="border-b-4 border-[#1A1A1A] pb-4">
+                <h2 className="text-3xl font-black italic tracking-tighter uppercase">MESSAGE_GENERATOR</h2>
+              </div>
+              <LeadForm onSubmit={handleGenerateMessages} isLoading={isGeneratingMessages} />
+              <DraftDisplay drafts={messageDrafts} />
             </div>
           )}
         </main>
