@@ -10,6 +10,10 @@ import type {
   DuplicateCheckResult,
   SearchFilters,
   LeadInput,
+  LeadProfile,
+  HumanizedMessage,
+  MessageDraft,
+  MessageStrategy,
   GenerateMessagesResponse,
   TokenUsage,
 } from '@/types'
@@ -44,8 +48,10 @@ function getOpenAI(): OpenAI {
   return openaiClient
 }
 
-// Modelo a usar: gpt-4o-mini (rápido, barato, suficiente para parsing estructurado)
+// Modelo para parsing/validación/enriquecimiento/humanización (rápido y barato)
 const MODEL = 'gpt-4o-mini'
+// Modelo para generación de mensajes (calidad máxima — upgrade a gpt-4o si es necesario)
+const MODEL_MESSAGES = 'gpt-4o-mini'
 
 // ── Confidence normalizer ────────────────────────────────────────────────────
 // OpenAI sometimes returns confidence as "90%", 90, "0.9", or 0.9.
@@ -296,114 +302,210 @@ Ejemplo de salida: site:linkedin.com/in/ "Director de Marketing" "Salud" Madrid`
 }
 
 // ============================================
-// PROMPT 5: generate_linkedin_messages_v3
-// Secuencia de 3 mensajes B2B orientados a cerrar conversaciones
+// PROMPT A: enrich_lead_profile_v1
+// Fase 1: Extrae insights de venta del perfil del lead
 // ============================================
 
-export async function generateLinkedInMessages(
-  lead: LeadInput
-): Promise<GenerateMessagesResponse> {
+export async function enrichLeadProfile(
+  name: string,
+  title: string,
+  company: string,
+  industry: string,
+  location: string
+): Promise<LeadProfile> {
   const openai = getOpenAI()
-
-  const hasSnippet = Boolean(lead.profile_snippet?.trim())
-  const snippetSection = hasSnippet
-    ? `\nCONTEXTO ADICIONAL DEL PERFIL: "${lead.profile_snippet}"`
-    : ''
-
-  const product = lead.your_product?.trim() || 'Tu Producto/Servicio'
 
   const response = await openai.chat.completions.create({
     model: MODEL,
-    max_tokens: 1200,
+    max_tokens: 400,
     response_format: { type: 'json_object' },
     messages: [
       {
         role: 'system',
-        content: `Eres un experto en ventas B2B por LinkedIn. Tu objetivo: generar 3 mensajes de secuencia que CIERREN CONVERSACIONES.
+        content: `Eres un analista de ventas B2B senior. Analizas perfiles de LinkedIn para extraer insights accionables que ayuden a personalizar mensajes de cold outreach. Eres específico, no genérico. Piensas como un vendedor de alto rendimiento: qué duele, qué motiva, qué presupuesto manejan. Responde siempre con JSON válido.`,
+      },
+      {
+        role: 'user',
+        content: `Analiza este perfil y devuelve insights de venta:
 
-Cada mensaje debe:
-1. SER ESPECÍFICO: Menciona el rol, empresa o industria del lead
-2. CREAR CURIOSIDAD: No vendas directo, haz preguntas que generen respuesta
-3. SER BREVE: máx 280 caracteres (LinkedIn friendly)
-4. TENER CTA CLARA: ¿15 min de chat? ¿Explorar juntos? ¿Agendar call?
+PERFIL:
+- Nombre: ${name}
+- Título: ${title}
+- Empresa: ${company}
+- Sector: ${industry}
+- Ubicación: ${location}
 
-SECUENCIA:
+Devuelve exactamente este JSON:
+{
+  "likely_pain_points": ["pain1", "pain2", "pain3"],
+  "decision_maker_level": "executive" | "manager" | "specialist",
+  "likely_priorities": ["priority1", "priority2"],
+  "company_size": "small" | "mid" | "enterprise",
+  "sector_keywords": ["keyword1", "keyword2", "keyword3"],
+  "role_psychology": "Una frase describiendo qué motiva y presiona a esta persona en su rol"
+}
 
-[MENSAJE 1 - PRIMER CONTACTO] (Objetivo: Abrir conversación)
-- Hook: Algo que lo sorprenda (estadística, dato, problema común)
-- Relevancia: ¿Por qué tú específicamente?
-- CTA: Suave (¿curiosidad? ¿explorar?)
+Reglas:
+- Basa TODO en datos reales del perfil. NUNCA inventar datos sin fundamento.
+- decision_maker_level: "executive" si tiene C-level/VP/Director; "manager" si lidera equipo; "specialist" si es individual contributor
+- company_size: "enterprise" si es multinacional/gran empresa; "mid" si es mediana empresa; "small" si es startup/pyme
+- sector_keywords: términos técnicos/de negocio propios de su sector
+- role_psychology: qué le quita el sueño y qué quiere conseguir en su rol`,
+      },
+    ],
+  })
 
-[MENSAJE 2 - FOLLOW-UP DÍA 3] (Objetivo: Recordar + ángulo diferente)
-- Alude al anterior sin sonar desesperado
-- Nuevo ángulo: Diferente razón para responder
-- Social proof: Empresas similares lo usan
-- CTA: Más directa
+  const text = response.choices[0].message.content ?? '{}'
+  return JSON.parse(text) as LeadProfile
+}
 
-[MENSAJE 3 - FOLLOW-UP DÍA 7] (Objetivo: Último push con urgencia)
-- Urgencia implícita (oportunidad, cambios próximos)
-- Beneficio claro: ¿Qué pierde sin actuar?
-- Cierre educado: Sin ser agresivo
+// ============================================
+// PROMPT B: generate_linkedin_messages_v4
+// Fase 2: Generación con estrategia de vendedor experto + anti-IA
+// ============================================
 
-USO DE {your_product} — MUY IMPORTANTE:
-{your_product} puede contener hasta 1000 caracteres con casos de éxito, métricas,
-features y problemas específicos que resuelve. Debes:
-- EXTRAER los datos más relevantes (cifras, resultados, problemas concretos)
-- DISTRIBUIR ese valor en los 3 mensajes con ángulos distintos:
-  → Mensaje 1: usa el problema o gancho más potente
-  → Mensaje 2: usa una métrica o caso de éxito diferente
-  → Mensaje 3: usa el beneficio o urgencia más directa
-- NO repetir el mismo argumento en dos mensajes
-- NO mencionar el nombre del producto/empresa directamente si suena a spam
+export async function generateLinkedInMessages(
+  lead: LeadInput,
+  profile?: LeadProfile
+): Promise<GenerateMessagesResponse> {
+  const openai = getOpenAI()
 
-REGLAS:
-- Personaliza con {name}, {company}, {role}, {sector}
-- No sonar robótico: usa contracciones ("te", "tu")
-- No vender directo: haz preguntas, crea curiosidad
-- Cada mensaje es independiente (lead podría responder a cualquiera)
-- Máx 280 caracteres CADA UNO (cuenta antes de responder; recorta si hace falta)
-- Tono profesional pero humano
-- NO usar: "Hola {name}, soy de X empresa"
-- SÍ usar: datos de {your_product}, problemas, métricas, urgencia
-- Tuteo ("tú") siempre
-- Sin emojis salvo que encajen muy naturalmente
-- Responde ÚNICAMENTE con JSON válido`,
+  const product = lead.your_product?.trim() || 'Tu Producto/Servicio'
+
+  const snippetSection = lead.profile_snippet?.trim()
+    ? `\nCONTEXTO DEL PERFIL: "${lead.profile_snippet}"`
+    : ''
+
+  const profileSection = profile
+    ? `
+PERFIL ENRIQUECIDO:
+- Pain points probables: ${profile.likely_pain_points.join(', ')}
+- Nivel de decisión: ${profile.decision_maker_level}
+- Prioridades: ${profile.likely_priorities.join(', ')}
+- Tamaño empresa: ${profile.company_size}
+- Keywords del sector: ${profile.sector_keywords.join(', ')}
+- Psicología del rol: ${profile.role_psychology}`
+    : ''
+
+  const response = await openai.chat.completions.create({
+    model: MODEL_MESSAGES,
+    max_tokens: 1500,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `Eres un vendedor B2B de élite con 15+ años cerrando deals de 6-7 figuras en cold outreach. Conoces psicología de ventas en profundidad, detectas patrones IA y los evitas instintivamente, y escribes como vendedor de verdad, no como chatbot.
+
+MISIÓN: Generar 3 mensajes LinkedIn que hagan que el lead TENGA QUE responder.
+
+RESTRICCIONES ABSOLUTAS (no negociables):
+1. Máx 280 caracteres por mensaje — cuenta siempre antes de entregar
+2. Tuteo ("tú", "tu") — más cercano y natural
+3. Sin emojis salvo que encajen orgánicamente (máx 1 en toda la secuencia)
+4. Sin listas con viñetas, sin markdown, sin asteriscos
+5. Sin frases IA: "espero que estés bien", "quería contactarte", "como experto", "además", "por otra parte", "en conclusión"
+6. Sin exclamaciones excesivas (máx 1 si es muy necesaria)
+7. Lenguaje profesional pero humano — no robótico, no demasiado informal
+
+TÉCNICAS ANTI-IA (aplicar obligatoriamente en cada mensaje):
+- Asimetría: mezcla frases cortas y largas (no todas igual de largas)
+- Especificidad: menciona datos reales del perfil (nombre, empresa, sector, rol)
+- Imperfecciones controladas: puntos suspensivos si hay duda, pregunta al final
+- Voz personal: como si lo escribiera un vendedor real, no un template
+- Puntuación variada: no todas las frases perfectamente construidas
+- Transiciones directas: nada de "además", "por lo tanto", "en conclusión"
+
+ESTRATEGIA POR MENSAJE:
+[1 - hook] Pattern interrupt, problema del sector o estadística inesperada. No empieces con "Hola".
+[2 - social_proof] Ángulo diferente al primero, caso similar, observación específica de su perfil.
+[3 - urgency] "Voy a ser directo" — beneficio claro, cierre educado sin presión, decisión en manos del lead.
+
+Responde ÚNICAMENTE con JSON válido.`,
       },
       {
         role: 'user',
         content: `Genera la secuencia de 3 mensajes para este lead.
 
 DATOS DEL LEAD:
-- {name}: ${lead.name}
-- {company}: ${lead.company || 'No especificada'}
-- {role}: ${lead.title || 'No especificado'}
-- {sector}: ${lead.industry || 'No especificado'}
-- {your_product}: ${product}${snippetSection}
+- Nombre: ${lead.name}
+- Título: ${lead.title || 'No especificado'}
+- Empresa: ${lead.company || 'No especificada'}
+- Sector: ${lead.industry || 'No especificado'}
+- Ubicación: ${lead.location || 'No especificada'}${snippetSection}${profileSection}
 
-Devuelve este JSON exacto:
+TU PRODUCTO/SERVICIO:
+${product}
+
+INSTRUCCIONES ESPECÍFICAS:
+
+[MENSAJE 1 - hook]
+Rompe la atención con un problema del sector o dato inesperado.
+Conecta con tu producto de forma no obvia. No vendas — genera curiosidad.
+No empieces con "Hola ${lead.name}," genérico. Empieza con el hook directamente.
+
+[MENSAJE 2 - social_proof]
+Ángulo completamente diferente al mensaje 1 (no repitas el mismo argumento).
+Haz una observación específica del perfil/empresa del lead.
+Menciona un caso similar que resolviste (sin revelar todo).
+Termina con pregunta o propuesta concreta (¿10 min?).
+
+[MENSAJE 3 - urgency]
+"Voy a ser directo:" — honestidad sin presión.
+Menciona cambios en el sector que hacen urgente actuar.
+Beneficio claro y directo. Cierre: decisión en manos del lead.
+
+CHECKLIST (verifica antes de responder):
+☐ ¿Cada mensaje ≤280 caracteres? (cuenta y recorta si no)
+☐ ¿Menciona datos reales del perfil (nombre, empresa o sector)?
+☐ ¿Parece escrito por un vendedor humano? (no IA)
+☐ ¿Estrategia diferente en cada mensaje?
+☐ ¿Sin frases genéricas de IA?
+
+Devuelve exactamente este JSON:
 {
-  "sequence_1": { "text": "...", "confidence": 0.0 },
-  "sequence_2": { "text": "...", "confidence": 0.0 },
-  "sequence_3": { "text": "...", "confidence": 0.0 }
+  "sequence_1": { "text": "...", "strategy": "hook", "ai_detector_risk": 0.0, "confidence": 0.0 },
+  "sequence_2": { "text": "...", "strategy": "social_proof", "ai_detector_risk": 0.0, "confidence": 0.0 },
+  "sequence_3": { "text": "...", "strategy": "urgency", "ai_detector_risk": 0.0, "confidence": 0.0 }
 }
 
-confidence: 0.0–1.0 según qué tan personalizado y efectivo es el mensaje.
-Penaliza −0.08 si no tienes contexto de perfil disponible.`,
+ai_detector_risk: 0.0–1.0 (probabilidad de detección como IA; meta < 0.20)
+confidence: 0.0–1.0 (qué tan personalizado y efectivo es el mensaje; penaliza −0.08 si sin datos de perfil)`,
       },
     ],
   })
 
   const raw = response.choices[0].message.content ?? '{}'
   const parsed = JSON.parse(raw) as {
-    sequence_1: { text: string; confidence: number }
-    sequence_2: { text: string; confidence: number }
-    sequence_3: { text: string; confidence: number }
+    sequence_1: { text: string; strategy: string; ai_detector_risk: number; confidence: number }
+    sequence_2: { text: string; strategy: string; ai_detector_risk: number; confidence: number }
+    sequence_3: { text: string; strategy: string; ai_detector_risk: number; confidence: number }
   }
 
-  const drafts = [
-    { draft_id: 1, sequence: 1 as const, text: parsed.sequence_1?.text ?? '', confidence: normalizeConfidence(parsed.sequence_1?.confidence) },
-    { draft_id: 2, sequence: 2 as const, text: parsed.sequence_2?.text ?? '', confidence: normalizeConfidence(parsed.sequence_2?.confidence) },
-    { draft_id: 3, sequence: 3 as const, text: parsed.sequence_3?.text ?? '', confidence: normalizeConfidence(parsed.sequence_3?.confidence) },
+  const drafts: MessageDraft[] = [
+    {
+      draft_id: 1,
+      sequence: 1,
+      text: parsed.sequence_1?.text ?? '',
+      confidence: normalizeConfidence(parsed.sequence_1?.confidence),
+      strategy: (parsed.sequence_1?.strategy as MessageStrategy) ?? 'hook',
+      ai_detector_risk: parsed.sequence_1?.ai_detector_risk ?? 0,
+    },
+    {
+      draft_id: 2,
+      sequence: 2,
+      text: parsed.sequence_2?.text ?? '',
+      confidence: normalizeConfidence(parsed.sequence_2?.confidence),
+      strategy: (parsed.sequence_2?.strategy as MessageStrategy) ?? 'social_proof',
+      ai_detector_risk: parsed.sequence_2?.ai_detector_risk ?? 0,
+    },
+    {
+      draft_id: 3,
+      sequence: 3,
+      text: parsed.sequence_3?.text ?? '',
+      confidence: normalizeConfidence(parsed.sequence_3?.confidence),
+      strategy: (parsed.sequence_3?.strategy as MessageStrategy) ?? 'urgency',
+      ai_detector_risk: parsed.sequence_3?.ai_detector_risk ?? 0,
+    },
   ]
 
   const usage = calcUsage(
@@ -412,4 +514,102 @@ Penaliza −0.08 si no tienes contexto de perfil disponible.`,
   )
 
   return { drafts, usage }
+}
+
+// ============================================
+// PROMPT C: humanize_message_v1
+// Fase 3: Post-procesamiento para reducir AI detection score
+// Solo se llama cuando ai_detector_risk > 0.30
+// ============================================
+
+export async function humanizeMessage(text: string): Promise<HumanizedMessage> {
+  const openai = getOpenAI()
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 500,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `Eres editor de copywriting experto en cold outreach. Tu trabajo: hacer que un mensaje generado por IA parezca escrito por un vendedor humano de verdad. Sin perder el hook ni la estrategia del original. Sin superar 280 caracteres. Responde siempre con JSON válido.`,
+      },
+      {
+        role: 'user',
+        content: `Humaniza este mensaje LinkedIn para reducir su detección como IA:
+
+MENSAJE: "${text}"
+
+Analiza y corrige:
+1. Palabras o frases que suenan robóticas o genéricas
+2. Estructura demasiado perfecta (todas las frases igual de largas)
+3. Transiciones explícitas de IA ("además", "por lo tanto", "en conclusión")
+4. Falta de especificidad o imperfecciones naturales
+
+Devuelve exactamente este JSON:
+{
+  "original": "${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
+  "humanized": "...",
+  "changes_made": ["cambio 1", "cambio 2"],
+  "ai_score_before": 0.0,
+  "ai_score_after": 0.0,
+  "confidence": 0.0
+}
+
+Reglas:
+- humanized ≤ 280 caracteres (obligatorio)
+- Preserva el hook y la estrategia del original
+- ai_score_after debe ser < 0.20
+- Solo haz cambios que reduzcan detección IA (no reescribas sin razón)
+- Añade asimetría: frases de longitud variada, pregunta al final, puntos suspensivos si encajan`,
+      },
+    ],
+  })
+
+  const raw = response.choices[0].message.content ?? '{}'
+  return JSON.parse(raw) as HumanizedMessage
+}
+
+// ============================================
+// PIPELINE: enrich → generate → humanize
+// Orquestador completo de generación de mensajes (v4)
+// ============================================
+
+const AI_RISK_HUMANIZE_THRESHOLD = 0.30
+
+export async function generateMessagesWithPipeline(
+  lead: LeadInput
+): Promise<GenerateMessagesResponse> {
+  // Fase 1: Enriquecer perfil del lead
+  const profile = await enrichLeadProfile(
+    lead.name,
+    lead.title,
+    lead.company,
+    lead.industry,
+    lead.location
+  )
+
+  // Fase 2: Generar mensajes con perfil enriquecido
+  const { drafts, usage } = await generateLinkedInMessages(lead, profile)
+
+  // Fase 3: Humanizar mensajes con alto riesgo de detección IA
+  const finalDrafts = await Promise.all(
+    drafts.map(async (draft) => {
+      if ((draft.ai_detector_risk ?? 0) > AI_RISK_HUMANIZE_THRESHOLD) {
+        try {
+          const result = await humanizeMessage(draft.text)
+          return {
+            ...draft,
+            text: result.humanized || draft.text,
+            ai_detector_risk: result.ai_score_after,
+          }
+        } catch {
+          return draft
+        }
+      }
+      return draft
+    })
+  )
+
+  return { drafts: finalDrafts, usage }
 }

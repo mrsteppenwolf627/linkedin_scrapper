@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
-import { generateLinkedInMessages } from '@/lib/claude_prompts'
+import { generateMessagesWithPipeline } from '@/lib/claude_prompts'
 import { saveLeadWithDrafts } from '@/lib/message_store'
 import type {
   BatchGenerateRequestBody,
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
       your_product,
     }
 
-    const { drafts, usage } = await generateLinkedInMessages(leadInput)
+    const { drafts, usage } = await generateMessagesWithPipeline(leadInput)
     const { lead_id } = await saveLeadWithDrafts(leadInput, drafts, { search_id })
 
     return { lead_id, usage }

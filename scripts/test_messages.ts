@@ -1,28 +1,29 @@
 // ============================================
-// Test Suite — LinkedIn Message Generator
+// Test Suite — LinkedIn Message Generator v4
 // Ejecutar: npm run test:messages
 //
 // Checks por lead:
-//   ✓ 3 drafts devueltos con tonos correctos
+//   ✓ 3 drafts devueltos con estrategias correctas (hook, social_proof, urgency)
 //   ✓ Cada draft ≤ 300 caracteres
 //   ✓ Los 3 drafts tienen aperturas distintas
-//   ✓ Consultative contiene pregunta (¿...?)
-//   ✓ Value-first no empieza con "Hola" ni con el nombre
+//   ✓ social_proof contiene pregunta (¿...?)
+//   ✓ hook no empieza con "Hola" genérico
 //   ✓ Confidence dentro de rango [0, 1]
+//   ✓ ai_detector_risk < 0.50 (meta real < 0.20)
 // ============================================
 
 import { config } from 'dotenv'
 import { resolve } from 'path'
 config({ path: resolve(process.cwd(), '.env.local') })
 
-import { generateLinkedInMessages } from '../src/lib/claude_prompts'
+import { generateMessagesWithPipeline } from '../src/lib/claude_prompts'
 import { SAMPLE_LEADS } from './sample_leads'
 import type { MessageDraft, TokenUsage } from '../src/types'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const CHAR_LIMIT = 300
-const TONES = ['direct', 'consultative', 'value_first'] as const
+const STRATEGIES = ['hook', 'social_proof', 'urgency'] as const
 
 function fmt(n: number, dec = 2) { return n.toFixed(dec) }
 function fmtCost(n: number)      { return `$${n.toFixed(6)}` }
@@ -46,8 +47,19 @@ function checkCharLimit(draft: MessageDraft): CheckResult {
   }
 }
 
-function checkConsultative(draft: MessageDraft): CheckResult | null {
-  if (draft.tone !== 'consultative') return null
+function checkAiRisk(draft: MessageDraft): CheckResult {
+  const risk = draft.ai_detector_risk ?? 0
+  const ok = risk < 0.50
+  return {
+    pass: ok,
+    msg:  ok
+      ? `ai_risk ${fmt(risk)} ✅${risk < 0.20 ? ' (excelente)' : ' (aceptable)'}`
+      : `ai_risk ${fmt(risk)} ❌ (alto riesgo)`,
+  }
+}
+
+function checkSocialProof(draft: MessageDraft): CheckResult | null {
+  if (draft.strategy !== 'social_proof') return null
   const hasQ = draft.text.includes('¿') || draft.text.includes('?')
   return {
     pass: hasQ,
@@ -55,15 +67,15 @@ function checkConsultative(draft: MessageDraft): CheckResult | null {
   }
 }
 
-function checkValueFirst(draft: MessageDraft): CheckResult | null {
-  if (draft.tone !== 'value_first') return null
+function checkHook(draft: MessageDraft): CheckResult | null {
+  if (draft.strategy !== 'hook') return null
   const first20 = draft.text.slice(0, 20).toLowerCase()
   const startsWithGreeting = first20.startsWith('hola') || /^[a-záéíóúñ]+,/.test(first20)
   return {
     pass: !startsWithGreeting,
     msg:  !startsWithGreeting
-      ? 'starts with value (not greeting) ✅'
-      : 'starts with greeting — weak value hook ❌',
+      ? 'starts with hook (not greeting) ✅'
+      : 'starts with greeting — weak hook ❌',
   }
 }
 
@@ -88,14 +100,14 @@ function checkDistinctOpeners(drafts: MessageDraft[]): CheckResult {
   }
 }
 
-function checkAllTonesPresent(drafts: MessageDraft[]): CheckResult {
-  const found = drafts.map(d => d.tone)
-  const missing = TONES.filter(t => !found.includes(t))
+function checkAllStrategiesPresent(drafts: MessageDraft[]): CheckResult {
+  const found = drafts.map(d => d.strategy)
+  const missing = STRATEGIES.filter(s => !found.includes(s))
   return {
     pass: missing.length === 0,
     msg:  missing.length === 0
-      ? 'all 3 tones present ✅'
-      : `missing tones: ${missing.join(', ')} ❌`,
+      ? 'all 3 strategies present ✅'
+      : `missing strategies: ${missing.join(', ')} ❌`,
   }
 }
 
@@ -103,7 +115,7 @@ function checkAllTonesPresent(drafts: MessageDraft[]): CheckResult {
 
 interface LeadResult {
   lead: string
-  draftResults: { tone: string; checks: CheckResult[]; text: string }[]
+  draftResults: { strategy: string; checks: CheckResult[]; text: string }[]
   crossChecks: CheckResult[]
   usage: TokenUsage
   allPassed: boolean
@@ -116,10 +128,10 @@ async function testLead(lead: typeof SAMPLE_LEADS[0], index: number): Promise<Le
   console.log(bar(`LEAD ${index + 1}/${SAMPLE_LEADS.length}: ${label}`))
 
   const t0 = Date.now()
-  const { drafts, usage } = await generateLinkedInMessages(lead)
+  const { drafts, usage } = await generateMessagesWithPipeline(lead)
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
 
-  console.log(`OpenAI ✓ (${elapsed}s) | tokens: ${usage.prompt_tokens}in + ${usage.completion_tokens}out = ${usage.total_tokens} | cost: ${fmtCost(usage.estimated_cost_usd)}`)
+  console.log(`Pipeline ✓ (${elapsed}s) | tokens: ${usage.prompt_tokens}in + ${usage.completion_tokens}out = ${usage.total_tokens} | cost: ${fmtCost(usage.estimated_cost_usd)}`)
 
   const draftResults: LeadResult['draftResults'] = []
   let allPassed = true
@@ -128,17 +140,15 @@ async function testLead(lead: typeof SAMPLE_LEADS[0], index: number): Promise<Le
   for (const draft of drafts) {
     const checks: CheckResult[] = []
 
-    const charCheck = checkCharLimit(draft)
-    checks.push(charCheck)
+    checks.push(checkCharLimit(draft))
+    checks.push(checkConfidence(draft))
+    checks.push(checkAiRisk(draft))
 
-    const confCheck = checkConfidence(draft)
-    checks.push(confCheck)
+    const hookCheck = checkHook(draft)
+    if (hookCheck) checks.push(hookCheck)
 
-    const consultCheck = checkConsultative(draft)
-    if (consultCheck) checks.push(consultCheck)
-
-    const vfCheck = checkValueFirst(draft)
-    if (vfCheck) checks.push(vfCheck)
+    const spCheck = checkSocialProof(draft)
+    if (spCheck) checks.push(spCheck)
 
     const draftPassed = checks.every(c => c.pass)
     if (!draftPassed) allPassed = false
@@ -147,16 +157,16 @@ async function testLead(lead: typeof SAMPLE_LEADS[0], index: number): Promise<Le
       ? draft.text.slice(0, 77) + '...'
       : draft.text
 
-    console.log(`\n  [${draft.tone.toUpperCase()}]`)
+    console.log(`\n  [${(draft.strategy ?? 'unknown').toUpperCase()}]`)
     console.log(`  "${preview}"`)
     checks.forEach(c => console.log(`    ${c.pass ? '' : '  '}${c.msg}`))
 
-    draftResults.push({ tone: draft.tone, checks, text: draft.text })
+    draftResults.push({ strategy: draft.strategy ?? 'unknown', checks, text: draft.text })
   }
 
   // Cross-draft checks
   const crossChecks: CheckResult[] = [
-    checkAllTonesPresent(drafts),
+    checkAllStrategiesPresent(drafts),
     checkDistinctOpeners(drafts),
   ]
 
@@ -174,7 +184,7 @@ async function testLead(lead: typeof SAMPLE_LEADS[0], index: number): Promise<Le
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(section('LinkedIn Message Generator — Test Suite'))
+  console.log(section('LinkedIn Message Generator v4 — Test Suite'))
 
   const args = process.argv.slice(2)
   const leadIndex = args[0] ? parseInt(args[0], 10) - 1 : -1
@@ -198,7 +208,6 @@ async function main() {
     totalCost += result.usage.estimated_cost_usd
     totalTokens += result.usage.total_tokens
 
-    // Small pause between API calls to avoid rate-limiting
     if (i < leadsToTest.length - 1) {
       await new Promise(r => setTimeout(r, 500))
     }

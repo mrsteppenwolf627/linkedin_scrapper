@@ -113,6 +113,30 @@ export interface LeadInput {
   your_product?: string  // Required for single endpoint; omitted in batch mode
 }
 
+// --- Lead Profile Enrichment (Phase 1 of pipeline) ---
+export type DecisionMakerLevel = 'executive' | 'manager' | 'specialist'
+export type CompanySize = 'small' | 'mid' | 'enterprise'
+export type MessageStrategy = 'hook' | 'social_proof' | 'urgency'
+
+export interface LeadProfile {
+  likely_pain_points: string[]
+  decision_maker_level: DecisionMakerLevel
+  likely_priorities: string[]
+  company_size: CompanySize
+  sector_keywords: string[]
+  role_psychology: string
+}
+
+// --- Humanized Message (Phase 3 of pipeline) ---
+export interface HumanizedMessage {
+  original: string
+  humanized: string
+  changes_made: string[]
+  ai_score_before: number
+  ai_score_after: number
+  confidence: number
+}
+
 export type MessageSequence = 1 | 2 | 3
 
 export interface MessageDraft {
@@ -120,6 +144,8 @@ export interface MessageDraft {
   sequence: MessageSequence
   text: string
   confidence: number
+  strategy?: MessageStrategy
+  ai_detector_risk?: number
 }
 
 export interface TokenUsage {

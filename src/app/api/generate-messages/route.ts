@@ -5,7 +5,7 @@
 // ============================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { generateLinkedInMessages } from '@/lib/claude_prompts'
+import { generateMessagesWithPipeline } from '@/lib/claude_prompts'
 import { saveLeadWithDrafts } from '@/lib/message_store'
 import type { GenerateMessagesRequestBody, GenerateMessagesApiResponse, ApiError } from '@/types'
 
@@ -53,8 +53,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 1. Generate 3 drafts via OpenAI
-    const { drafts, usage } = await generateLinkedInMessages(leadInput)
+    // 1. Generate 3 drafts via pipeline (enrich → generate → humanize)
+    const { drafts, usage } = await generateMessagesWithPipeline(leadInput)
 
     // 2. Server-side cost log (not exposed to client)
     console.log(
