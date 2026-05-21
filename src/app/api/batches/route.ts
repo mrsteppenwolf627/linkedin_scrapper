@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data, error } = await supabase
       .from('message_batches')
-      .select('id, created_at, search_id, search_name, label, total_leads, your_product')
+      .select('*')
       .order('created_at', { ascending: false })
 
     if (error) {
