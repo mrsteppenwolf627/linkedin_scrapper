@@ -36,8 +36,48 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const search_id = searchParams.get('search_id')
+  const batch_id = searchParams.get('batch_id')
+  const legacy = searchParams.get('legacy')
 
   const supabase = createServerClient()
+
+  // If legacy=true, fetch drafts without batch_id (batch_id IS NULL)
+  if (legacy === 'true') {
+    const { data, error } = await supabase
+      .from('message_drafts')
+      .select('id, lead_name, lead_linkedin_url, lead_company, sequence, draft_text')
+      .is('batch_id', null)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('[/api/drafts] Supabase error:', error.message)
+      return NextResponse.json<ApiError>(
+        { error: 'Database Error', message: error.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(data ?? [])
+  }
+
+  // If batch_id provided, fetch drafts from message_drafts table
+  if (batch_id) {
+    const { data, error } = await supabase
+      .from('message_drafts')
+      .select('id, lead_name, lead_linkedin_url, lead_company, sequence, draft_text')
+      .eq('batch_id', batch_id)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('[/api/drafts] Supabase error:', error.message)
+      return NextResponse.json<ApiError>(
+        { error: 'Database Error', message: error.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(data ?? [])
+  }
 
   // Fetch leads (+ nested drafts + search name), ordered by search_id then lead id
   let query = supabase
