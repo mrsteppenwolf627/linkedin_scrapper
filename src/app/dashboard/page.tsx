@@ -1,7 +1,6 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 interface MeResponse {
@@ -15,6 +14,7 @@ interface MeResponse {
 
 export default function DashboardPage() {
   const [isAdmin, setIsAdmin] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
@@ -33,6 +33,7 @@ export default function DashboardPage() {
 
         const data = (await response.json()) as MeResponse
         setIsAdmin(data.user?.role === 'admin')
+        setUserEmail(data.user?.email || '')
       } catch {
         setIsAdmin(false)
       } finally {
@@ -45,57 +46,130 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-gray-500">Cargando...</p>
+      <div className="flex items-center justify-center min-h-screen bg-[#F0EDE4]">
+        <p className="text-[#1A1A1A]">Cargando...</p>
       </div>
     )
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <h1 className="text-4xl font-bold mb-8">Dashboard</h1>
-
-      {isAdmin && (
-        <div className="mb-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <Link href="/dashboard/users">
-            <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition">
-              Gestionar Usuarios
+    <div className="bg-[#F0EDE4] min-h-screen">
+      {/* NAVBAR */}
+      <nav className="border-b border-[#1A1A1A] bg-[#F0EDE4] sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">⚡</span>
+            <h1 className="text-xl font-bold text-[#1A1A1A] uppercase tracking-wide">
+              LinkedIn Scraper
+            </h1>
+          </div>
+          <a href="/api/auth/logout">
+            <button className="text-sm font-bold text-[#1A1A1A] border border-[#1A1A1A] px-4 py-2 hover:bg-[#F5F5F5] transition">
+              LOGOUT
             </button>
-          </Link>
-          <p className="text-sm text-gray-600 mt-2">
-            Panel exclusivo de administrador para gestionar todos los usuarios del sistema
+          </a>
+        </div>
+      </nav>
+
+      {/* MAIN CONTENT */}
+      <div className="max-w-6xl mx-auto px-6 py-12">
+        {/* HEADER */}
+        <header className="mb-12">
+          <h1 className="text-4xl font-bold text-[#1A1A1A] mb-2 italic uppercase">
+            Bienvenido, {userEmail.split('@')[0]}
+          </h1>
+          <p className="text-base text-[#1A1A1A] uppercase tracking-wide">
+            Gestiona tus búsquedas, mensajes y usuarios
           </p>
-        </div>
-      )}
+        </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 bg-white rounded-lg shadow hover:shadow-lg transition">
-          <h2 className="text-xl font-semibold mb-2">Busquedas</h2>
-          <p className="text-gray-600">Gestiona tus busquedas de LinkedIn</p>
-          <Link href="/dashboard/searches">
-            <button className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition">
-              Ver
-            </button>
-          </Link>
+        {/* GRID 2x2 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+          {/* Card 1: BUSCADOR */}
+          <a href="/dashboard/search">
+            <div className="border border-[#1A1A1A] p-8 hover:bg-[#F5F5F5] cursor-pointer transition">
+              <div className="flex items-center gap-3 mb-6">
+                <span className="text-4xl">🔍</span>
+                <h2 className="text-2xl font-bold text-[#1A1A1A] uppercase">Buscador</h2>
+              </div>
+              <p className="text-base text-[#1A1A1A] mb-8 leading-relaxed">
+                Busca perfiles en LinkedIn y encuentra prospectivos para tus campañas
+              </p>
+              <button className="w-full bg-[#D94F00] text-white px-6 py-3 font-bold text-sm uppercase hover:brightness-90 transition">
+                Buscar
+              </button>
+            </div>
+          </a>
+
+          {/* Card 2: MIS BÚSQUEDAS */}
+          <a href="/dashboard/searches">
+            <div className="border border-[#1A1A1A] p-8 hover:bg-[#F5F5F5] cursor-pointer transition">
+              <div className="flex items-center gap-3 mb-6">
+                <span className="text-4xl">📋</span>
+                <h2 className="text-2xl font-bold text-[#1A1A1A] uppercase">Mis Búsquedas</h2>
+              </div>
+              <p className="text-base text-[#1A1A1A] mb-8 leading-relaxed">
+                Ve tus búsquedas guardadas y comienza a generar mensajes personalizados
+              </p>
+              <button className="w-full bg-[#D94F00] text-white px-6 py-3 font-bold text-sm uppercase hover:brightness-90 transition">
+                Ver
+              </button>
+            </div>
+          </a>
+
+          {/* Card 3: GENERADOR */}
+          <a href="/dashboard/searches">
+            <div className="border border-[#1A1A1A] p-8 hover:bg-[#F5F5F5] cursor-pointer transition">
+              <div className="flex items-center gap-3 mb-6">
+                <span className="text-4xl">💬</span>
+                <h2 className="text-2xl font-bold text-[#1A1A1A] uppercase">Generador</h2>
+              </div>
+              <p className="text-base text-[#1A1A1A] mb-8 leading-relaxed">
+                Crea mensajes personalizados con IA (3 variantes por lead)
+              </p>
+              <button className="w-full bg-[#4A7C59] text-white px-6 py-3 font-bold text-sm uppercase hover:brightness-90 transition">
+                Generar
+              </button>
+            </div>
+          </a>
+
+          {/* Card 4: HUB DE MENSAJES */}
+          <a href="/dashboard/messages">
+            <div className="border border-[#1A1A1A] p-8 hover:bg-[#F5F5F5] cursor-pointer transition">
+              <div className="flex items-center gap-3 mb-6">
+                <span className="text-4xl">📧</span>
+                <h2 className="text-2xl font-bold text-[#1A1A1A] uppercase">Hub de Mensajes</h2>
+              </div>
+              <p className="text-base text-[#1A1A1A] mb-8 leading-relaxed">
+                Visualiza tus mensajes generados, cópialos y gestiona tus lotes
+              </p>
+              <button className="w-full bg-[#4A7C59] text-white px-6 py-3 font-bold text-sm uppercase hover:brightness-90 transition">
+                Ver
+              </button>
+            </div>
+          </a>
         </div>
 
-        <div className="p-6 bg-white rounded-lg shadow hover:shadow-lg transition">
-          <h2 className="text-xl font-semibold mb-2">Mensajes</h2>
-          <p className="text-gray-600">Ver tus mensajes y secuencias</p>
-          <Link href="/dashboard/messages">
-            <button className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition">
-              Ver
-            </button>
-          </Link>
-        </div>
-
-        <div className="p-6 bg-white rounded-lg shadow hover:shadow-lg transition">
-          <h2 className="text-xl font-semibold mb-2">Lotes</h2>
-          <p className="text-gray-600">Gestiona tus lotes de busqueda</p>
-          <button className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition">
-            Proximamente
-          </button>
-        </div>
+        {/* ADMIN SECTION */}
+        {isAdmin && (
+          <section className="border-t border-[#1A1A1A] pt-12">
+            <h2 className="text-2xl font-bold text-[#1A1A1A] mb-8 uppercase">Herramientas Admin</h2>
+            <a href="/dashboard/users">
+              <div className="border border-[#1A1A1A] p-8 hover:bg-[#F5F5F5] cursor-pointer transition">
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="text-4xl">⚙️</span>
+                  <h3 className="text-2xl font-bold text-[#1A1A1A] uppercase">Gestionar Usuarios</h3>
+                </div>
+                <p className="text-base text-[#1A1A1A] mb-8 leading-relaxed">
+                  Aprueba/rechaza usuarios, gestiona roles y permisos del sistema
+                </p>
+                <button className="w-full bg-[#D94F00] text-white px-6 py-3 font-bold text-sm uppercase hover:brightness-90 transition">
+                  Gestionar
+                </button>
+              </div>
+            </a>
+          </section>
+        )}
       </div>
     </div>
   )
