@@ -316,13 +316,32 @@ Auth: Supabase Auth + JWT HttpOnly cookies
 Password: bcrypt hashing (Supabase automatic)
 Styling: Tailwind CSS con variables OKLCH
 
+V4: /api/drafts Endpoint ✅ STABLE (22 mayo 2026)
+
+Commit: 69d7a7a — "Fix: Remove batch_id filter from /api/drafts, load all 633+ messages"
+Estado: ESTABLE — push en master, versión de producción.
+
+Implementacion:
+- src/app/api/drafts/route.ts
+- Usa Supabase REST API con fetch() nativo (sin SDK)
+- JOIN con tabla leads: ?select=id,sequence,draft_text,batch_id,leads(name,linkedin_url,company)
+- Sin filtros: retorna TODOS los mensajes (666 records en producción)
+- Formato: { drafts: [] } — siempre JSON válido, nunca HTML
+- Try/catch: retorna { drafts: [] } ante cualquier error
+- console.log/error para debugging
+
+Decisión técnica:
+- El endpoint NO filtra por batch_id ni legacy — devuelve todos los registros
+- El dashboard consume response.drafts (actualizado en messages/page.tsx)
+- Verificado: 666 drafts con campos id, lead_name, lead_linkedin_url, lead_company, sequence, draft_text
+
 Proximas Tareas
 TAREA 12: E2E Tests (Codex)
 
 Signup -> Pending -> Approve -> Signin -> Access
 
-Ultima actualizacion: 12 de mayo de 2026, 15:20
-Estado: V3 Auth + Dashboard + Admin + User Management COMPLETO | E2E Tests PENDIENTE
+Ultima actualizacion: 22 de mayo de 2026
+Estado: V3 Auth + Dashboard + Admin + User Management COMPLETO | /api/drafts ESTABLE | E2E Tests PENDIENTE
 Build note: ✅ npm run build pasando (incluye fix de SearchFilters en scripts/test_search.ts, commit fd75c09).
 
 V3: User Management Panel ✅ COMPLETE (TAREA 13)

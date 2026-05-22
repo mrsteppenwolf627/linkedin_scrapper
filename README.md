@@ -1,130 +1,109 @@
-﻿# LinkedIn Lead Scraper V3 - Message Generator + Auth
+# LinkedIn Scraper — Message Generator
 
-Sistema de prospeccion B2B con flujo completo:
-1. Buscar perfiles en LinkedIn
-2. Generar mensajes personalizados con IA
-3. Gestionar acceso con autenticacion y aprobacion admin
+Transforma búsquedas de LinkedIn en mensajes de outreach personalizados con IA.
 
 ## Stack
 
-- Next.js 15 (App Router)
-- React + TypeScript + Tailwind CSS
-- Supabase (PostgreSQL + Auth)
-- OpenAI (gpt-4o-mini)
+- **Next.js 15** + TypeScript + Tailwind CSS
+- **Supabase** PostgreSQL (auth + datos)
+- **OpenAI** gpt-4o-mini (generación de mensajes)
 
-## Estado actual
+## Quick Start
 
-- V1-V2 Message Generator: COMPLETO
-- V3 Auth System: COMPLETO
-- V3 Admin Approvals Dashboard (`/admin/approvals`): COMPLETO
-- V3 User Management Panel (`/dashboard/users`, solo admins): COMPLETO (TAREA 13)
-- E2E auth flow (TAREA 12): PENDIENTE
+```bash
+npm install
+cp .env.example .env.local   # configurar variables
+npm run dev                   # http://localhost:3000
+```
+
+## Variables de entorno requeridas
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+OPENAI_API_KEY=...
+SEARCH_API_KEY=...
+NEXT_PUBLIC_SEARCH_API_KEY=...
+```
 
 ## Rutas principales
 
-- Publicas:
-  - `/`
-  - `/login`
-  - `/api/auth/*`
+| Ruta | Descripción |
+|------|-------------|
+| `/` | Landing page |
+| `/login` | Auth (signin / signup) |
+| `/dashboard` | Dashboard principal |
+| `/dashboard/messages` | Ver todos los mensajes generados |
+| `/dashboard/searches` | Gestionar búsquedas |
+| `/dashboard/users` | Gestión de usuarios (solo admin) |
 
-- Protegidas:
-  - `/dashboard/*` (usuario autenticado y aprobado)
-  - `/admin/*` (admin y aprobado)
-
-## Flujo de usuario
-
-### Usuario nuevo
-
-1. Ir a `/login`
-2. Crear cuenta (`POST /api/auth/signup`)
-3. Queda en `pending_approval`
-4. Esperar aprobacion de admin
-
-### Admin
-
-1. Ir a `/admin/approvals`
-2. Aprobar/rechazar pendientes
-3. Ir a `/dashboard`
-4. Ver boton `Gestionar Usuarios`
-5. Entrar a `/dashboard/users`
-6. Gestionar roles, estado y eliminacion de usuarios
-
-### Usuario aprobado
-
-1. Iniciar sesion (`POST /api/auth/signin`)
-2. Recibe cookie HttpOnly `auth-token`
-3. Accede a `/dashboard/*`
-4. No ve acceso a `/dashboard/users` si no es admin
-
-## Endpoints V3 (Auth/Admin)
+## API Endpoints
 
 ### Auth
-
-- `POST /api/auth/signup`
-- `POST /api/auth/signin`
+- `POST /api/auth/signup` — registro → `status='pending_approval'`
+- `POST /api/auth/signin` — login (requiere `status='approved'`)
 - `POST /api/auth/logout`
-- `GET /api/auth/me`
 
 ### Admin
-
 - `GET /api/admin/pending-users`
 - `POST /api/admin/approve-user/[id]`
 - `POST /api/admin/reject-user/[id]`
-- `GET /api/admin/users`
-- `PATCH /api/admin/users/[id]`
-- `DELETE /api/admin/users/[id]`
 
-## Endpoints Message Generator
+### Message Generator
+- `GET /api/searches` — listar búsquedas
+- `GET /api/batches` — listar lotes de mensajes
+- `GET /api/drafts` — todos los mensajes generados (estable, 666+ records)
+- `POST /api/generate-messages` — generar mensajes con IA
 
-- `POST /api/search`
-- `GET /api/searches`
-- `GET /api/contacts?search_id=<uuid>`
-- `POST /api/generate-messages`
-- `POST /api/generate-messages/batch`
-- `GET /api/generate-messages/batch/status?search_id=<uuid>`
-- `GET /api/drafts`
-- `GET /api/batches`
+## /api/drafts — Endpoint estable (v4, 22 mayo 2026)
 
-## Seguridad
-
-- Password hashing por Supabase Auth
-- Cookie de sesion HttpOnly (`auth-token`)
-- Middleware protege `/dashboard/*` y `/admin/*`
-- Guard server-side `requireApproved()` y `requireAdmin()`
-- Endpoints admin protegidos server-side
-
-## Variables de entorno
-
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_ANON_KEY=
-
-# OpenAI
-OPENAI_API_KEY=
-
-# Search
-SEARCHAPI_IO_KEY=
-SEARCH_API_KEY=
-NEXT_PUBLIC_SEARCH_API_KEY=
-
-# App
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-NEXT_PUBLIC_ADMIN_EMAIL=
+```
+GET /api/drafts
 ```
 
-## Scripts utiles
+- Devuelve **TODOS** los mensajes de `message_drafts` sin filtros
+- Join automático con `leads` para nombre, LinkedIn URL y empresa
+- Respuesta siempre JSON válido: `{ drafts: [...] }`
+- En caso de error devuelve `{ drafts: [] }` (nunca HTML)
+- Commit estable: `69d7a7a`
 
-```bash
-npm run dev
-npm run build
-npm run test:search
-npm run test:auth
+```json
+{
+  "drafts": [
+    {
+      "id": "uuid",
+      "lead_name": "Joan-Baptista Pont Pons",
+      "lead_linkedin_url": "https://linkedin.com/in/...",
+      "lead_company": "PONT consultori",
+      "sequence": 1,
+      "draft_text": "Hola Joan-Baptista..."
+    }
+  ]
+}
 ```
 
-## Notas
+## Arquitectura de datos
 
-- LinkedIn DM no se envia automatico: el usuario copia y pega mensajes.
-- README mantenido en UTF-8 limpio para evitar caracteres rotos en GitHub.
+```
+searches → leads → message_drafts
+                       ↕
+                 message_batches
+```
+
+## Estado del proyecto
+
+| Módulo | Estado |
+|--------|--------|
+| V1-V2 Message Generator | Completo |
+| V3 Auth System | Completo |
+| V3 Admin Dashboard | Completo |
+| V3 User Management | Completo |
+| V4 /api/drafts fix | Estable |
+| E2E Tests | Pendiente |
+
+## Roles de desarrollo
+
+- **Claude Code** — Backend (API routes, DB, auth, lógica)
+- **Gemini CLI** — Frontend (componentes, UI/UX)
+- **Codex** — Testing (e2e, integración, seguridad)
