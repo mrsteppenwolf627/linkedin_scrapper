@@ -10,20 +10,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ drafts: [] })
     }
 
-    const { searchParams } = new URL(req.url)
-    const legacy = searchParams.get('legacy')
-    const batch_id = searchParams.get('batch_id')
+    const apiUrl = `${supabaseUrl}/rest/v1/message_drafts?select=id,sequence,draft_text,batch_id,leads(name,linkedin_url,company)&order=created_at.desc&limit=1000`
 
-    // Build REST API URL with embedded leads join
-    let apiUrl = `${supabaseUrl}/rest/v1/message_drafts?select=id,sequence,draft_text,batch_id,leads(name,linkedin_url,company)&order=created_at.desc&limit=1000`
-
-    if (legacy === 'true') {
-      apiUrl += '&batch_id=is.null'
-    } else if (batch_id) {
-      apiUrl += `&batch_id=eq.${batch_id}`
-    }
-
-    console.log('[/api/drafts] Fetching:', apiUrl)
+    console.log('[/api/drafts] Fetching all messages...')
 
     const response = await fetch(apiUrl, {
       headers: {
@@ -42,7 +31,6 @@ export async function GET(req: NextRequest) {
     const data = await response.json()
     console.log('[/api/drafts] Fetched', data?.length ?? 0, 'drafts')
 
-    // Flatten lead info into each draft row
     const drafts = (data || []).map((d: any) => ({
       id: d.id,
       lead_name: d.leads?.name ?? '',
