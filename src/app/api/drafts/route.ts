@@ -43,40 +43,76 @@ export async function GET(req: NextRequest) {
 
   // If legacy=true, fetch drafts without batch_id (batch_id IS NULL)
   if (legacy === 'true') {
-    const { data, error } = await supabase
+    const { data: drafts, error: draftError } = await supabase
       .from('message_drafts')
-      .select('id, lead_name, lead_linkedin_url, lead_company, sequence, draft_text')
+      .select('id, lead_id, sequence, draft_text')
       .is('batch_id', null)
       .order('created_at', { ascending: true })
 
-    if (error) {
-      console.error('[/api/drafts] Supabase error:', error.message)
+    if (draftError) {
+      console.error('[/api/drafts] Supabase error:', draftError.message)
       return NextResponse.json<ApiError>(
-        { error: 'Database Error', message: error.message },
+        { error: 'Database Error', message: draftError.message },
         { status: 500 }
       )
     }
 
-    return NextResponse.json(data ?? [])
+    // Get all unique lead IDs
+    const leadIds = [...new Set((drafts ?? []).map((d: any) => d.lead_id))]
+    const { data: leads } = await supabase
+      .from('leads')
+      .select('id, name, linkedin_url, company')
+      .in('id', leadIds)
+
+    const leadMap = new Map(leads?.map((l: any) => [l.id, l]) ?? [])
+
+    const flattened = (drafts ?? []).map((d: any) => ({
+      id: d.id,
+      lead_name: leadMap.get(d.lead_id)?.name ?? '',
+      lead_linkedin_url: leadMap.get(d.lead_id)?.linkedin_url ?? '',
+      lead_company: leadMap.get(d.lead_id)?.company ?? null,
+      sequence: d.sequence,
+      draft_text: d.draft_text,
+    }))
+
+    return NextResponse.json(flattened)
   }
 
   // If batch_id provided, fetch drafts from message_drafts table
   if (batch_id) {
-    const { data, error } = await supabase
+    const { data: drafts, error: draftError } = await supabase
       .from('message_drafts')
-      .select('id, lead_name, lead_linkedin_url, lead_company, sequence, draft_text')
+      .select('id, lead_id, sequence, draft_text')
       .eq('batch_id', batch_id)
       .order('created_at', { ascending: true })
 
-    if (error) {
-      console.error('[/api/drafts] Supabase error:', error.message)
+    if (draftError) {
+      console.error('[/api/drafts] Supabase error:', draftError.message)
       return NextResponse.json<ApiError>(
-        { error: 'Database Error', message: error.message },
+        { error: 'Database Error', message: draftError.message },
         { status: 500 }
       )
     }
 
-    return NextResponse.json(data ?? [])
+    // Get all unique lead IDs
+    const leadIds = [...new Set((drafts ?? []).map((d: any) => d.lead_id))]
+    const { data: leads } = await supabase
+      .from('leads')
+      .select('id, name, linkedin_url, company')
+      .in('id', leadIds)
+
+    const leadMap = new Map(leads?.map((l: any) => [l.id, l]) ?? [])
+
+    const flattened = (drafts ?? []).map((d: any) => ({
+      id: d.id,
+      lead_name: leadMap.get(d.lead_id)?.name ?? '',
+      lead_linkedin_url: leadMap.get(d.lead_id)?.linkedin_url ?? '',
+      lead_company: leadMap.get(d.lead_id)?.company ?? null,
+      sequence: d.sequence,
+      draft_text: d.draft_text,
+    }))
+
+    return NextResponse.json(flattened)
   }
 
   // Fetch leads (+ nested drafts + search name), ordered by search_id then lead id
