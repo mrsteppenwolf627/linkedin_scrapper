@@ -100,7 +100,8 @@ export default function MessagesPage() {
         headers: { "x-api-key": API_KEY },
       });
       if (legacyRes.ok) {
-        const legacyArr: RawDraft[] = await legacyRes.json();
+        const legacyData = await legacyRes.json();
+        const legacyArr: RawDraft[] = legacyData.drafts ?? legacyData;
         const legacyMap = new Map<string, LeadRow>();
         for (const d of legacyArr) {
           const key = d.lead_name + d.lead_linkedin_url;
@@ -153,7 +154,8 @@ export default function MessagesPage() {
       });
       if (!res.ok) throw new Error("Failed to load drafts");
 
-      const arr: RawDraft[] = await res.json();
+      const resData = await res.json();
+      const arr: RawDraft[] = resData.drafts ?? resData;
 
       // Group by lead name
       const map = new Map<string, LeadRow>();
