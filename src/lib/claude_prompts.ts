@@ -517,9 +517,252 @@ confidence: 0.0–1.0 (qué tan personalizado y efectivo es el mensaje; penaliza
 }
 
 // ============================================
+// PROMPT B v2: generate_linkedin_messages_v2
+// Cialdini-Enhanced: 10 principios + trigger + estructura por mensaje
+// ============================================
+
+export async function generateLinkedInMessages_v2(
+  lead: LeadInput,
+  profile?: LeadProfile
+): Promise<GenerateMessagesResponse> {
+  const openai = getOpenAI()
+
+  const product = lead.your_product?.trim() || 'Tu Producto/Servicio'
+
+  const snippetSection = lead.profile_snippet?.trim()
+    ? `\nSNIPPET DEL PERFIL: "${lead.profile_snippet}"`
+    : ''
+
+  const profileSection = profile
+    ? `
+CONTEXTO ENRIQUECIDO:
+- Pain points: ${profile.likely_pain_points.join(', ')}
+- Nivel decisión: ${profile.decision_maker_level}
+- Prioridades: ${profile.likely_priorities.join(', ')}
+- Tamaño empresa: ${profile.company_size}
+- Keywords sector: ${profile.sector_keywords.join(', ')}
+- Psicología del rol: ${profile.role_psychology}`
+    : ''
+
+  const response = await openai.chat.completions.create({
+    model: MODEL_MESSAGES,
+    max_tokens: 2000,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `Eres un vendedor B2B de élite que cierra deals de 6-7 figuras usando psicología de persuasión (Cialdini). Generas 3 mensajes LinkedIn que el lead TIENE QUE responder porque están basados en principios psicológicos universales, no en tácticas de venta.
+
+NO ERES CHATBOT. Eres un vendedor real con 15+ años de experiencia. Tu escritura:
+- Es asimétrica (frases cortas y largas mezcladas)
+- Tiene imperfecciones naturales
+- Menciona datos específicos, no generalizaciones
+- Suena como WhatsApp con un colega, no como email corporativo
+
+RESTRICCIONES ABSOLUTAS (no negociables):
+1. Máx 280 caracteres por mensaje (cuenta SIEMPRE antes de devolver)
+2. Tuteo ("tú", "tu")
+3. Sin emojis salvo que encajen (máx 1 en toda la secuencia)
+4. Sin viñetas, sin markdown, sin asteriscos
+5. Sin frases IA: "espero que estés bien", "como experto", "quería contactarte", "además", "por lo tanto"
+6. Sin más de 1 exclamación por mensaje
+7. Sin preguntas retóricas obvias
+
+10 PRINCIPIOS CIALDINI (aplicar uno dominante por mensaje, ser orgánico):
+[1] RECIPROCIDAD - Da primero sin pedir nada (dato, insight, recurso)
+[2] SMALL COMMITMENT - Pregunta fácil (sí/no) antes de reunión completa
+[3] SOCIAL PROOF - Caso de cliente similar (nombre real o industria)
+[4] MAKE THEM FEEL SEEN - Datos específicos de SU contexto, no genérico
+[5] UNA PREGUNTA - Una sola por mensaje (máx)
+[6] TONO HUMANO - Como colega, no vendedor
+[7] BREVE - Respetá su tiempo
+[8] CON PÁRRAFOS - Legibilidad
+[9] ESCASEZ - "Tengo X slots", "Esta semana", "Antes de que..."
+[10] UNIDAD - "Del mismo lado", "Nosotros resolvemos"
+
+ESTRUCTURA OBLIGATORIA POR MENSAJE:
+[MSG 1 - TRIGGER + RECIPROCIDAD]
+  → Menciona cambio/evento específico (nuevo rol, proyecto, sector)
+  → Da insight sin pedir nada (reciprocidad pura)
+  → Principios: [1, 4] (reciprocidad + make them feel seen)
+  → NO empieces con "Hola [Name]"
+  → NO pidas reunión
+
+[MSG 2 - SOCIAL PROOF + SMALL COMMITMENT]
+  → Caso similar resuelto (sin revelar todo)
+  → Pregunta fácil sí/no (pequeño "sí" primero)
+  → Principios: [2, 3] (small commitment + social proof)
+  → NO pidas reunión aún
+
+[MSG 3 - ESCASEZ + UNIDAD]
+  → "Voy a ser directo" o equivalente honesto
+  → Escasez real ("tengo 2 slots esta semana")
+  → Beneficio claro + decisión en manos del lead
+  → Principios: [9, 10] (escasez + unidad)
+
+ANTI-IA CHECKS (ejecutar ANTES de devolver):
+☐ ¿Cada mensaje ≤280 caracteres?
+☐ ¿Menciona datos REALES del lead?
+☐ ¿Suena como vendedor humano?
+☐ ¿Diferente estrategia en cada mensaje?
+☐ ¿Sin frases genéricas de IA?
+☐ ¿Una sola pregunta por mensaje?
+
+ai_detector_risk RIGUROSO:
+0.00–0.15: Parece humano, específico, con imperfecciones naturales
+0.15–0.25: Bueno, podría ser más específico
+0.25–0.40: Detecta elementos IA pero dominan elementos humanos
+0.40+: Claramente generado por IA (rechazar, reescribir)
+
+confidence RIGUROSO:
+0.90+: Muy personalizado, dato específico del perfil, tiene "bite"
+0.70–0.90: Bueno, pero le falta algo de contexto específico
+0.50–0.70: Genérico, templado, podría impactar más
+<0.50: Débil, no merece enviarse`,
+      },
+      {
+        role: 'user',
+        content: `GENERA 3 MENSAJES PARA ESTE LEAD
+
+DATOS DEL LEAD:
+- Nombre: ${lead.name}
+- Título: ${lead.title || 'No especificado'}
+- Empresa: ${lead.company || 'No especificada'}
+- Sector: ${lead.industry || 'No especificado'}
+- Ubicación: ${lead.location || 'No especificada'}${snippetSection}${profileSection}
+
+TU SOLUCIÓN:
+${product}
+
+════════════════════════════════════════════════════════════════
+STEP 1: IDENTIFICA UN TRIGGER REAL
+- Nuevo rol / ascenso
+- Crecimiento de empresa
+- Ronda de inversión (busca en el contexto)
+- Proyecto anunciado
+- Cambio en equipo/estructura
+Si no hay trigger evidente → menciona observación de su sector/industria
+
+STEP 2: CONSTRUYE CADA MENSAJE
+
+[MENSAJE 1 - TRIGGER + RECIPROCIDAD]
+- Línea 1: El trigger (lo que observaste)
+- Línea 2-3: Insight/dato sin vender (reciprocidad pura)
+- Sin CTA de reunión
+- NO hacer: "Hola ${lead.name}, vi que trabajas en..."
+- SÍ hacer: Empieza con la observación/trigger directamente
+
+[MENSAJE 2 - SOCIAL PROOF + SMALL COMMITMENT]
+- Línea 1: Caso similar (empresa/rol similar)
+- Línea 2: Lo que resolvimos (sin revelar todo)
+- Línea 3: Pregunta fácil sí/no
+- No pidas reunión. Busca pequeño "sí" primero.
+
+[MENSAJE 3 - ESCASEZ + UNIDAD]
+- Línea 1: "Voy a ser directo" o equivalente honesto
+- Línea 2: Escasez real ("tengo 2 slots esta semana")
+- Línea 3: Beneficio claro
+- Cierre: Decisión en manos del lead
+
+════════════════════════════════════════════════════════════════
+CHECKLIST FINAL:
+☐ ¿Identifiqué trigger real o hice observación específica?
+☐ ¿Mensaje 1 da valor sin pedir nada?
+☐ ¿Mensaje 2 tiene caso similar + pregunta fácil?
+☐ ¿Mensaje 3 es directo + escasez + unidad?
+☐ ¿Cada mensaje ≤280 caracteres?
+☐ ¿Sin frases IA estándar?
+☐ ¿Una sola pregunta por mensaje?
+☐ ¿Datos reales del perfil mencionados?
+☐ ¿ai_detector_risk < 0.25?
+
+Devuelve EXACTAMENTE este JSON:
+{
+  "trigger_identified": "El cambio/evento que identificaste",
+  "sequence_1": {
+    "text": "...",
+    "principle_applied": ["RECIPROCIDAD", "MAKE_THEM_FEEL_SEEN"],
+    "character_count": 0,
+    "has_cta": false,
+    "ai_detector_risk": 0.0,
+    "confidence": 0.0
+  },
+  "sequence_2": {
+    "text": "...",
+    "principle_applied": ["SOCIAL_PROOF", "SMALL_COMMITMENT"],
+    "character_count": 0,
+    "has_question": true,
+    "ai_detector_risk": 0.0,
+    "confidence": 0.0
+  },
+  "sequence_3": {
+    "text": "...",
+    "principle_applied": ["ESCASEZ", "UNIDAD"],
+    "character_count": 0,
+    "has_scarcity": true,
+    "ai_detector_risk": 0.0,
+    "confidence": 0.0
+  },
+  "strategy_notes": "Explicación breve de por qué funcionará esta secuencia"
+}
+
+RECUERDA: Si algún mensaje > 280 caracteres → RECHAZALO y reescribe antes de devolver.`,
+      },
+    ],
+  })
+
+  const raw = response.choices[0].message.content ?? '{}'
+  const parsed = JSON.parse(raw) as {
+    trigger_identified: string
+    sequence_1: { text: string; principle_applied: string[]; character_count: number; has_cta: boolean; ai_detector_risk: number; confidence: number }
+    sequence_2: { text: string; principle_applied: string[]; character_count: number; has_question: boolean; ai_detector_risk: number; confidence: number }
+    sequence_3: { text: string; principle_applied: string[]; character_count: number; has_scarcity: boolean; ai_detector_risk: number; confidence: number }
+    strategy_notes: string
+  }
+
+  console.log(`[generate_v2] trigger="${parsed.trigger_identified}"`)
+  console.log(`[generate_v2] principles=[${parsed.sequence_1?.principle_applied}] | [${parsed.sequence_2?.principle_applied}] | [${parsed.sequence_3?.principle_applied}]`)
+  console.log(`[generate_v2] ai_risk=${parsed.sequence_1?.ai_detector_risk} / ${parsed.sequence_2?.ai_detector_risk} / ${parsed.sequence_3?.ai_detector_risk}`)
+
+  const drafts: MessageDraft[] = [
+    {
+      draft_id: 1,
+      sequence: 1,
+      text: parsed.sequence_1?.text ?? '',
+      confidence: normalizeConfidence(parsed.sequence_1?.confidence),
+      strategy: 'hook' as MessageStrategy,
+      ai_detector_risk: parsed.sequence_1?.ai_detector_risk ?? 0,
+    },
+    {
+      draft_id: 2,
+      sequence: 2,
+      text: parsed.sequence_2?.text ?? '',
+      confidence: normalizeConfidence(parsed.sequence_2?.confidence),
+      strategy: 'social_proof' as MessageStrategy,
+      ai_detector_risk: parsed.sequence_2?.ai_detector_risk ?? 0,
+    },
+    {
+      draft_id: 3,
+      sequence: 3,
+      text: parsed.sequence_3?.text ?? '',
+      confidence: normalizeConfidence(parsed.sequence_3?.confidence),
+      strategy: 'urgency' as MessageStrategy,
+      ai_detector_risk: parsed.sequence_3?.ai_detector_risk ?? 0,
+    },
+  ]
+
+  const usage = calcUsage(
+    response.usage?.prompt_tokens ?? 0,
+    response.usage?.completion_tokens ?? 0
+  )
+
+  return { drafts, usage }
+}
+
+// ============================================
 // PROMPT C: humanize_message_v1
 // Fase 3: Post-procesamiento para reducir AI detection score
-// Solo se llama cuando ai_detector_risk > 0.30
+// Solo se llama cuando ai_detector_risk > 0.25 (bajado de 0.30)
 // ============================================
 
 export async function humanizeMessage(text: string): Promise<HumanizedMessage> {
@@ -575,7 +818,7 @@ Reglas:
 // Orquestador completo de generación de mensajes (v4)
 // ============================================
 
-const AI_RISK_HUMANIZE_THRESHOLD = 0.30
+const AI_RISK_HUMANIZE_THRESHOLD = 0.25
 
 export async function generateMessagesWithPipeline(
   lead: LeadInput
@@ -589,8 +832,8 @@ export async function generateMessagesWithPipeline(
     lead.location
   )
 
-  // Fase 2: Generar mensajes con perfil enriquecido
-  const { drafts, usage } = await generateLinkedInMessages(lead, profile)
+  // Fase 2: Generar mensajes con Cialdini v2
+  const { drafts, usage } = await generateLinkedInMessages_v2(lead, profile)
 
   // Fase 3: Humanizar mensajes con alto riesgo de detección IA
   const finalDrafts = await Promise.all(
